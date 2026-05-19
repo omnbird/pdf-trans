@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build outputs
+dist/
+target/
+src-tauri/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Generated files
+python_engine/output/
+python_engine/temp/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Claude
+.claude/
+
+# Environment files (if any)
+.env
+.env.local

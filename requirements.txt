@@ -1,0 +1,26 @@
+# PDF processing
+pymupdf>=1.23.0
+
+# Translation (OpenAI-compatible, supports DeepSeek)
+openai>=1.0.0
+
+# PDF generation for scanned mode
+reportlab>=4.0.0
+
+# Configuration & data validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+toml>=0.10.2
+
+# Async & concurrency
+aiohttp>=3.9.0
+
+# Image processing
+Pillow>=10.0.0
+
+# OCR (optional for scanned mode, heavy - install separately if needed)
+# paddleocr>=2.7.0
+
+# Utils
+rich>=13.0.0
+tenacity>=8.0.0

@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 use tauri::ipc::Channel;
@@ -118,6 +118,17 @@ pub async fn translate_pdf(
     }
     state.cancelled.store(false, Ordering::SeqCst);
 
+    // Forward stderr lines to Tauri dev console in real time
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                eprintln!("[engine stderr] {}", line);
+            }
+        });
+    }
+
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
@@ -218,21 +229,7 @@ pub async fn translate_pdf(
         *stored = None;
     }
     if !status.success() {
-        // Read stderr for debugging
-        let stderr = child.stderr.take();
-        let stderr_msg = if let Some(stderr) = stderr {
-            let mut reader = BufReader::new(stderr);
-            let mut buf = String::new();
-            let _ = reader.read_to_string(&mut buf).await;
-            if buf.trim().is_empty() {
-                format!("Engine exited with code: {:?}", status.code())
-            } else {
-                format!("Engine exited with code: {:?}\n{}", status.code(), buf.trim())
-            }
-        } else {
-            format!("Engine exited with code: {:?}", status.code())
-        };
-        return Err(stderr_msg);
+        return Err(format!("Engine exited with code: {:?}", status.code()));
     }
 
     Ok(result)

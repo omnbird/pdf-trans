@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import sys
+import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -18,6 +20,8 @@ from python_engine.md_generator import generate_markdown
 from python_engine.ocr_engine import PaddleOCREngine
 from python_engine.pdf_processor import PDFDocument, is_diagram_or_table_page, is_readable_text, merge_blocks_to_paragraphs, parse_page_ranges, process_pdf
 from python_engine.translator import Translator
+
+logger = logging.getLogger(__name__)
 
 
 class TranslationEngine:
@@ -145,22 +149,33 @@ class TranslationEngine:
         from PIL import Image
 
         output_files: dict[str, str] = {}
+        logger.info("[Pipeline] Mistral pipeline starting: %s", input_path)
 
         # Parse page ranges
-        doc = fitz.open(input_path)
-        total_pages = len(doc)
-        page_indices = parse_page_ranges(self.config.pages, total_pages)
-        doc.close()
+        try:
+            doc = fitz.open(input_path)
+            total_pages = len(doc)
+            page_indices = parse_page_ranges(self.config.pages, total_pages)
+            doc.close()
+            logger.info("[Pipeline] PDF parsed: total_pages=%d, selected=%d, pages=%s", total_pages, len(page_indices), page_indices[:10] if len(page_indices) <= 10 else f"{page_indices[0]}..{page_indices[-1]}")
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Failed to parse PDF %s: %s\n%s", input_path, err_msg, traceback.format_exc())
+            self._report_error(f"Failed to parse PDF: {err_msg}")
+            return output_files
 
         if not page_indices:
+            logger.warning("[Pipeline] No pages selected")
             self._report_error("No pages selected")
             return output_files
 
         api_key = self.config.scanned.mistral_api_key
         if not api_key:
+            logger.warning("[Pipeline] Mistral API key not configured")
             self._report_error("Mistral API key not configured. Set it in Settings > Scanned PDF.")
             return output_files
 
+        logger.info("[Pipeline] API key present (len=%d), creating client", len(api_key))
         self._report_progress(
             "processing", 5, 100,
             f"Processing {len(page_indices)} pages via Mistral OCR...",
@@ -169,11 +184,18 @@ class TranslationEngine:
         client = MistralOCRClient(api_key=api_key)
 
         # process_pages handles chunking (splitting into ≤1000-page uploads)
-        mistral_pages = await client.process_pages(
-            input_path,
-            page_indices,
-            on_progress=lambda msg: self._report_progress("processing", 10, 100, msg),
-        )
+        try:
+            mistral_pages = await client.process_pages(
+                input_path,
+                page_indices,
+                on_progress=lambda msg: self._report_progress("processing", 10, 100, msg),
+            )
+            logger.info("[Pipeline] Mistral OCR returned %d pages", len(mistral_pages))
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Mistral OCR failed: %s\n%s", err_msg, traceback.format_exc())
+            self._report_error(f"Mistral OCR failed: {err_msg}")
+            return output_files
 
         self._report_progress(
             "processing", 40, 100,
@@ -187,26 +209,42 @@ class TranslationEngine:
             "Do NOT translate Sanskrit proper nouns unless a standard Chinese name exists. "
             "Output ONLY the translated Markdown, no explanations."
         )
+        logger.info("[Pipeline] Translating %d pages via DeepSeek...", len(mistral_pages))
 
         async def _translate_one(page_num: int, md: str, idx: int) -> tuple[int, str]:
-            result = await self.translator._translate_single(
-                md,
-                context=mistral_translation_prompt,
-            )
-            self._report_progress(
-                "translating",
-                40 + int(50 * (idx + 1) / len(mistral_pages)),
-                100,
-                f"Translated page {page_num + 1}/{total_pages}",
-            )
-            return page_num, result.translated
+            logger.debug("[Pipeline] Translating page %d/%d (page_num=%d, md_len=%d)", idx + 1, len(mistral_pages), page_num + 1, len(md))
+            try:
+                result = await self.translator._translate_single(
+                    md,
+                    context=mistral_translation_prompt,
+                )
+                logger.debug("[Pipeline] Translated page %d/%d (page_num=%d, result_len=%d)", idx + 1, len(mistral_pages), page_num + 1, len(result.translated))
+                self._report_progress(
+                    "translating",
+                    40 + int(50 * (idx + 1) / len(mistral_pages)),
+                    100,
+                    f"Translated page {page_num + 1}/{total_pages}",
+                )
+                return page_num, result.translated
+            except Exception as e:
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.error("[Pipeline] Translation failed for page %d: %s\n%s", page_num + 1, err_msg, traceback.format_exc())
+                raise
 
-        translated_results = await asyncio.gather(*[
-            _translate_one(num, md, i) for i, (num, md) in enumerate(mistral_pages)
-        ])
-        translated_results.sort(key=lambda x: x[0])
+        try:
+            translated_results = await asyncio.gather(*[
+                _translate_one(num, md, i) for i, (num, md) in enumerate(mistral_pages)
+            ])
+            translated_results.sort(key=lambda x: x[0])
+            logger.info("[Pipeline] Translation complete: %d pages", len(translated_results))
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Translation batch failed: %s", err_msg)
+            self._report_error(f"Translation failed: {err_msg}")
+            return output_files
 
         self._report_progress("generating", 90, 100, "Generating output files...")
+        logger.info("[Pipeline] Generating output files...")
 
         # Prepare output paths
         output_dir = Path(self.config.output_dir)
@@ -219,59 +257,83 @@ class TranslationEngine:
         # Extract original page images for Markdown references.
         # We resize to 120 DPI and JPEG q60 to keep Markdown side-car files
         # small (originals are JPEG2000 ~5-10x more efficient than JPEG).
-        doc = fitz.open(input_path)
-        for page_num, _ in mistral_pages:
-            page = doc[page_num]
-            image_list = page.get_images(full=True)
-            if image_list:
-                largest = max(image_list, key=lambda img: img[2] * img[3])
-                info = doc.extract_image(largest[0])
-                img = Image.open(io.BytesIO(info["image"]))
-                target_w = int(page.rect.width * 120 / 72)
-                target_h = int(page.rect.height * 120 / 72)
-                img = img.resize((target_w, target_h), Image.LANCZOS)
-            else:
-                pix = page.get_pixmap(dpi=120)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            img_path = temp_dir / f"mistral_page_{page_num:04d}.jpg"
-            img.save(img_path, "JPEG", quality=60)
-        doc.close()
+        try:
+            doc = fitz.open(input_path)
+            logger.info("[Pipeline] Extracting images from %d pages...", len(mistral_pages))
+            for page_num, _ in mistral_pages:
+                page = doc[page_num]
+                image_list = page.get_images(full=True)
+                if image_list:
+                    largest = max(image_list, key=lambda img: img[2] * img[3])
+                    info = doc.extract_image(largest[0])
+                    img = Image.open(io.BytesIO(info["image"]))
+                    target_w = int(page.rect.width * 120 / 72)
+                    target_h = int(page.rect.height * 120 / 72)
+                    img = img.resize((target_w, target_h), Image.LANCZOS)
+                else:
+                    pix = page.get_pixmap(dpi=120)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                img_path = temp_dir / f"mistral_page_{page_num:04d}.jpg"
+                img.save(img_path, "JPEG", quality=60)
+            doc.close()
+            logger.info("[Pipeline] Images extracted to %s", temp_dir)
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Image extraction failed: %s\n%s", err_msg, traceback.format_exc())
+            self._report_error(f"Image extraction failed: {err_msg}")
+            return output_files
 
         # 1. Original Mistral OCR Markdown
         original_md_path = output_dir / f"{base_name}_mistral_original.md"
-        with open(original_md_path, "w", encoding="utf-8") as f:
-            f.write(f"# {base_name} (Mistral OCR)\n\n")
-            for page_num, md in mistral_pages:
-                f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
-                f.write(md)
-                f.write("\n")
+        logger.info("[Pipeline] Writing original markdown: %s", original_md_path)
+        try:
+            with open(original_md_path, "w", encoding="utf-8") as f:
+                f.write(f"# {base_name} (Mistral OCR)\n\n")
+                for page_num, md in mistral_pages:
+                    f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
+                    f.write(md)
+                    f.write("\n")
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Failed to write original markdown: %s", err_msg)
 
         # 2. Translated Markdown
         translated_md_path = output_dir / f"{base_name}_mistral_translated.md"
-        with open(translated_md_path, "w", encoding="utf-8") as f:
-            f.write(f"# {base_name} (Translation)\n\n")
-            for page_num, md in translated_results:
-                f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
-                f.write(md)
-                f.write("\n")
+        logger.info("[Pipeline] Writing translated markdown: %s", translated_md_path)
+        try:
+            with open(translated_md_path, "w", encoding="utf-8") as f:
+                f.write(f"# {base_name} (Translation)\n\n")
+                for page_num, md in translated_results:
+                    f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
+                    f.write(md)
+                    f.write("\n")
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Failed to write translated markdown: %s", err_msg)
 
         # 3. Dual Markdown (original image + translated text)
         dual_md_path = output_dir / f"{base_name}_mistral_dual.md"
-        with open(dual_md_path, "w", encoding="utf-8") as f:
-            f.write(f"# {base_name} (Dual)\n\n")
-            f.write("> Each section shows the original scanned page followed by its translation.\n\n")
-            for i, (page_num, _) in enumerate(mistral_pages):
-                img_path = temp_dir / f"mistral_page_{page_num:04d}.jpg"
-                f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
-                f.write("### Original Page\n\n")
-                f.write(f"![Page {page_num + 1}]({img_path})\n\n")
-                f.write("### Translation\n\n")
-                f.write(translated_results[i][1])
-                f.write("\n")
+        logger.info("[Pipeline] Writing dual markdown: %s", dual_md_path)
+        try:
+            with open(dual_md_path, "w", encoding="utf-8") as f:
+                f.write(f"# {base_name} (Dual)\n\n")
+                f.write("> Each section shows the original scanned page followed by its translation.\n\n")
+                for i, (page_num, _) in enumerate(mistral_pages):
+                    img_path = temp_dir / f"mistral_page_{page_num:04d}.jpg"
+                    f.write(f"\n---\n\n## Page {page_num + 1}\n\n")
+                    f.write("### Original Page\n\n")
+                    f.write(f"![Page {page_num + 1}]({img_path})\n\n")
+                    f.write("### Translation\n\n")
+                    f.write(translated_results[i][1])
+                    f.write("\n")
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            logger.error("[Pipeline] Failed to write dual markdown: %s", err_msg)
 
         output_files["markdown"] = str(translated_md_path)
         output_files["markdown_original"] = str(original_md_path)
         output_files["markdown_dual"] = str(dual_md_path)
+        logger.info("[Pipeline] Markdown outputs: %s", list(output_files.keys()))
 
         # 4. Dual PDF — PyMuPDF hybrid to preserve original image compression
         if "pdf" in self.config.output.formats:
@@ -281,14 +343,21 @@ class TranslationEngine:
             pages_data = [
                 (page_num, md) for page_num, md in translated_results
             ]
-            generate_vision_dual_pdf_v2(
-                pages_data,
-                source_path=input_path,
-                output_path=pdf_path,
-                translation_margin_cm=self.config.output.translation_margin_cm,
-            )
-            output_files["pdf"] = str(pdf_path)
+            logger.info("[Pipeline] Generating dual PDF: %s (%d pages)", pdf_path, len(pages_data))
+            try:
+                generate_vision_dual_pdf_v2(
+                    pages_data,
+                    source_path=input_path,
+                    output_path=pdf_path,
+                    translation_margin_cm=self.config.output.translation_margin_cm,
+                )
+                output_files["pdf"] = str(pdf_path)
+                logger.info("[Pipeline] PDF generated: %s", pdf_path)
+            except Exception as e:
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.error("[Pipeline] PDF generation failed: %s\n%s", err_msg, traceback.format_exc())
 
+        logger.info("[Pipeline] Mistral pipeline finished. Output files: %s", output_files)
         return output_files
 
     async def _run_vision_pipeline(
@@ -552,15 +621,24 @@ class TranslationEngine:
 
         # Mistral OCR pipeline (completely independent, handles everything itself)
         if self.config.scanned.mode == "mistral_ocr":
+            logger.info("[Engine] Mode=mistral_ocr, starting pipeline for %s", input_path)
             self._report_progress("processing", 0, 100, "Starting Mistral OCR pipeline...")
-            mistral_outputs = await self._run_mistral_pipeline(input_path)
+            try:
+                mistral_outputs = await self._run_mistral_pipeline(input_path)
+            except Exception as e:
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.error("[Engine] Mistral pipeline crashed: %s\n%s", err_msg, traceback.format_exc())
+                self._report_error(f"Mistral pipeline crashed: {err_msg}")
+                return {}
 
             if not mistral_outputs:
+                logger.warning("[Engine] Mistral pipeline returned no outputs")
                 self._report_error("No output files were generated")
                 return {}
 
             self._report_progress("generating", 100, 100, "Done!")
             self._report_finish(mistral_outputs)
+            logger.info("[Engine] Mistral pipeline finished: %s", mistral_outputs)
             return mistral_outputs
 
         # Step 1: Process PDF
@@ -585,7 +663,8 @@ class TranslationEngine:
                 output_files.update(babeldoc_outputs)
                 babeldoc_success = True
             except Exception as e:
-                msg = f"BabelDOC failed: {e}"
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                msg = f"BabelDOC failed: {err_msg}"
                 self._report_progress("translating", 25, 100, msg)
                 # Continue to fallback pipeline
 

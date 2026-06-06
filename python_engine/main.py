@@ -12,11 +12,27 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 
 from python_engine.config import EngineConfig, load_config
 from python_engine.engine import TranslationEngine
+
+
+def _setup_logging(level: int = logging.INFO) -> None:
+    """Configure logging to write to stderr so it doesn't collide with stdout JSON events."""
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+    formatter = logging.Formatter(
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(level)
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +65,12 @@ async def main() -> int:
         config.pages = args.pages
     if args.debug:
         config.debug = True
+
+    # Setup logging — must go to stderr because stdout is reserved for JSON events
+    log_level = logging.DEBUG if config.debug else logging.INFO
+    _setup_logging(log_level)
+    logger = logging.getLogger(__name__)
+    logger.info("Engine starting: input=%s pages=%s mode=%s", args.input, config.pages, config.scanned.mode)
 
     # Resolve output_dir: CLI flag wins, otherwise fall back to the user-facing
     # output.default_output_dir UI setting. Expand `~` so paths like

@@ -49,6 +49,8 @@ class Translator:
             api_key=config.api_key,
         )
         self.model = config.model
+        # Provider-specific extra fields (e.g. disable thinking/reasoning)
+        self.extra_body = dict(config.extra_body or {})
 
         # Setup rate limiter — each mode uses only its own parameter
         if config.rate_limit.mode == "rpm":
@@ -115,6 +117,7 @@ class Translator:
                 ],
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
+                extra_body=self.extra_body or None,
             )
 
         translated = response.choices[0].message.content.strip()

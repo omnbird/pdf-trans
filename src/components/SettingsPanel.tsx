@@ -78,6 +78,10 @@ export default function SettingsPanel({ config, onChange }: Props) {
           onChange={(v) => update("translation.model", v)}
           placeholder="deepseek-chat"
         />
+        <ExtraBodyInput
+          value={config.translation.extra_body}
+          onChange={(v) => update("translation.extra_body", v)}
+        />
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             onClick={handleTest}
@@ -341,6 +345,10 @@ export default function SettingsPanel({ config, onChange }: Props) {
                   onChange={(v) => update("vision.model", v)}
                   placeholder="gemini-2.5-flash-preview-04-17"
                 />
+                <ExtraBodyInput
+                  value={config.vision.extra_body}
+                  onChange={(v) => update("vision.extra_body", v)}
+                />
                 <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
                   Supports Gemini, GPT-4o, or any OpenAI-compatible vision API
                 </div>
@@ -407,6 +415,78 @@ export default function SettingsPanel({ config, onChange }: Props) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function ExtraBodyInput({
+  value,
+  onChange,
+}: {
+  value: Record<string, unknown>;
+  onChange: (value: Record<string, unknown>) => void;
+}) {
+  const [text, setText] = useState(() =>
+    Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : ""
+  );
+  const [error, setError] = useState("");
+
+  const handleChange = (raw: string) => {
+    setText(raw);
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      setError("");
+      onChange({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        setError("Must be a JSON object");
+        return;
+      }
+      setError("");
+      onChange(parsed as Record<string, unknown>);
+    } catch {
+      setError("Invalid JSON — not applied until fixed");
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: "block", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+        Extra Request Body (JSON, optional)
+      </label>
+      <textarea
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder='{"thinking": {"type": "disabled"}}'
+        style={{
+          width: "100%",
+          minHeight: 72,
+          padding: 12,
+          background: "#0a0a0a",
+          color: error ? "#ef4444" : "#e5e5e5",
+          border: "1px solid #333",
+          borderRadius: 8,
+          fontFamily: "monospace",
+          fontSize: 13,
+          lineHeight: 1.5,
+          resize: "vertical",
+          outline: "none",
+        }}
+      />
+      {error ? (
+        <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>{error}</div>
+      ) : (
+        <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+          Merged into every chat.completions request. To disable reasoning/thinking:
+          Gemini <code>{'{"google": {"thinking_config": {"thinking_budget": 0}}}'}</code>;
+          Qwen <code>{'{"enable_thinking": false}'}</code>;
+          GLM/DeepSeek <code>{'{"thinking": {"type": "disabled"}}'}</code>;
+          OpenAI <code>{'{"reasoning_effort": "minimal"}'}</code>.
+        </div>
+      )}
     </div>
   );
 }

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import toml
 from pydantic import BaseModel, Field
@@ -48,6 +48,13 @@ class TranslationConfig(BaseModel):
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE
     temperature: float = 0.3
     max_tokens: int = 4096
+    # Extra JSON fields merged into the chat.completions request body.
+    # Providers disagree on how to disable reasoning/thinking, e.g.:
+    #   Gemini (OpenAI-compat): {"google": {"thinking_config": {"thinking_budget": 0}}}
+    #   Qwen/DashScope:         {"enable_thinking": false}
+    #   GLM/Zhipu & DeepSeek:   {"thinking": {"type": "disabled"}}
+    #   OpenAI o-series:        {"reasoning_effort": "minimal"}
+    extra_body: dict[str, Any] = Field(default_factory=dict)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
 
 
@@ -59,6 +66,8 @@ class VisionConfig(BaseModel):
     api_key: str = ""
     model: str = "gemini-2.5-flash-preview-04-17"
     max_tokens: int = 4096
+    # Same purpose as TranslationConfig.extra_body (disable thinking, etc.).
+    extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
 class OutputConfig(BaseModel):

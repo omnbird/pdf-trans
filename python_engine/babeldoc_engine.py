@@ -28,6 +28,12 @@ class CustomOpenAITranslator(OpenAITranslator):
     def __init__(self, config: EngineConfig, **kwargs):
         super().__init__(**kwargs)
         self._engine_config = config
+        # Merge user-configured extra body fields (e.g. disable thinking)
+        # into whatever BabelDOC set up. BabelDOC's do_translate() sends
+        # self.extra_body with every chat.completions request.
+        extra_body = dict(config.translation.extra_body or {})
+        if extra_body:
+            self.extra_body.update(extra_body)
 
     def prompt(self, text):
         """Override prompt to inject astrology/vedic domain context."""

@@ -11,6 +11,7 @@ export interface AppConfig {
     model: string;
     prompt_template: string;
     temperature: number;
+    extra_body: Record<string, unknown>;
     rate_limit: {
       mode: "rpm" | "concurrent" | "custom";
       rpm: number;
@@ -31,6 +32,7 @@ export interface AppConfig {
     base_url: string;
     api_key: string;
     model: string;
+    extra_body: Record<string, unknown>;
   };
   scanned: {
     is_scanned: boolean;
@@ -59,6 +61,7 @@ Text to translate:
 
 Chinese translation:`,
     temperature: 0.3,
+    extra_body: {},
     rate_limit: {
       mode: "rpm",
       rpm: 240,
@@ -79,6 +82,7 @@ Chinese translation:`,
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
     api_key: "",
     model: "gemini-2.5-flash-preview-04-17",
+    extra_body: {},
   },
   scanned: {
     is_scanned: false,

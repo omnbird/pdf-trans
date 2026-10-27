@@ -47,6 +47,8 @@ class VisionClient:
         )
         self.model = config.model
         self.max_tokens = 4096
+        # Provider-specific extra fields (e.g. disable thinking for Gemini)
+        self.extra_body = dict(config.extra_body or {})
 
     @staticmethod
     def _image_to_base64(image: Image.Image) -> str:
@@ -90,6 +92,7 @@ class VisionClient:
             }],
             temperature=0.1,
             max_tokens=self.max_tokens,
+            extra_body=self.extra_body or None,
         )
 
         content = response.choices[0].message.content or ""

@@ -287,88 +287,95 @@ export default function SettingsPanel({ config, onChange }: Props) {
 
       {/* Scanned PDF Options */}
       <Section title="Scanned PDF">
-        <Select
-          label="Processing Mode"
-          value={config.scanned.mode}
-          onChange={(v) => update("scanned.mode", v)}
-          options={[
-            { value: "ocr", label: "PaddleOCR (local, free)" },
-            { value: "vision", label: "Vision API (cloud, structured Markdown output)" },
-            { value: "mistral_ocr", label: "Mistral OCR (cloud, dedicated OCR API)" },
-          ]}
-        />
-        <Input
-          label="DPI"
-          value={String(config.scanned.dpi)}
-          onChange={(v) => update("scanned.dpi", parseInt(v) || 300)}
-          type="number"
-        />
         <CheckBox
-          label="Force OCR mode (override auto-detection)"
-          checked={config.scanned.force_ocr}
-          onChange={(checked) => update("scanned.force_ocr", checked)}
+          label="Treat input PDF as scanned (use OCR pipeline)"
+          checked={config.scanned.is_scanned}
+          onChange={(checked) => update("scanned.is_scanned", checked)}
         />
         <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-          Enable if scanned PDF is mis-detected as text-based and produces garbled output
+          The app no longer auto-detects. Toggle this on for scanned / image-based PDFs;
+          leave it off for normal text-based PDFs.
         </div>
 
-        {config.scanned.mode === "vision" && (
-          <div style={{ marginTop: 16, padding: 16, background: "#0a0a0a", borderRadius: 8, border: "1px solid #333" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 12 }}>
-              Vision API Configuration
-            </div>
-            <Input
-              label="Base URL"
-              value={config.vision.base_url}
-              onChange={(v) => update("vision.base_url", v)}
-              placeholder="https://generativelanguage.googleapis.com/v1beta/openai/"
+        {config.scanned.is_scanned && (
+          <>
+            <div style={{ height: 1, background: "#222", margin: "16px 0" }} />
+            <Select
+              label="Processing Mode"
+              value={config.scanned.mode}
+              onChange={(v) => update("scanned.mode", v)}
+              options={[
+                { value: "ocr", label: "PaddleOCR (local, free)" },
+                { value: "vision", label: "Vision API (cloud, structured Markdown output)" },
+                { value: "mistral_ocr", label: "Mistral OCR (cloud, dedicated OCR API)" },
+              ]}
             />
             <Input
-              label="API Key"
-              value={config.vision.api_key}
-              onChange={(v) => update("vision.api_key", v)}
-              type="password"
-              placeholder="..."
+              label="DPI"
+              value={String(config.scanned.dpi)}
+              onChange={(v) => update("scanned.dpi", parseInt(v) || 300)}
+              type="number"
             />
-            <Input
-              label="Model"
-              value={config.vision.model}
-              onChange={(v) => update("vision.model", v)}
-              placeholder="gemini-2.5-flash-preview-04-17"
-            />
-            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-              Supports Gemini, GPT-4o, or any OpenAI-compatible vision API
-            </div>
-          </div>
-        )}
 
-        {config.scanned.mode === "mistral_ocr" && (
-          <div style={{ marginTop: 16, padding: 16, background: "#0a0a0a", borderRadius: 8, border: "1px solid #333" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 12 }}>
-              Mistral OCR Configuration
-            </div>
-            <Input
-              label="API Key"
-              value={config.scanned.mistral_api_key}
-              onChange={(v) => update("scanned.mistral_api_key", v)}
-              type="password"
-              placeholder="..."
-            />
-            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-              Get your API key from the{" "}
-              <a
-                href="https://console.mistral.ai/api-keys/"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "#3b82f6" }}
-              >
-                Mistral Console
-              </a>
-            </div>
-            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-              Mistral OCR is a dedicated OCR API for scanned documents. Page range slicing is supported — only selected pages are uploaded for OCR.
-            </div>
-          </div>
+            {config.scanned.mode === "vision" && (
+              <div style={{ marginTop: 16, padding: 16, background: "#0a0a0a", borderRadius: 8, border: "1px solid #333" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 12 }}>
+                  Vision API Configuration
+                </div>
+                <Input
+                  label="Base URL"
+                  value={config.vision.base_url}
+                  onChange={(v) => update("vision.base_url", v)}
+                  placeholder="https://generativelanguage.googleapis.com/v1beta/openai/"
+                />
+                <Input
+                  label="API Key"
+                  value={config.vision.api_key}
+                  onChange={(v) => update("vision.api_key", v)}
+                  type="password"
+                  placeholder="..."
+                />
+                <Input
+                  label="Model"
+                  value={config.vision.model}
+                  onChange={(v) => update("vision.model", v)}
+                  placeholder="gemini-2.5-flash-preview-04-17"
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  Supports Gemini, GPT-4o, or any OpenAI-compatible vision API
+                </div>
+              </div>
+            )}
+
+            {config.scanned.mode === "mistral_ocr" && (
+              <div style={{ marginTop: 16, padding: 16, background: "#0a0a0a", borderRadius: 8, border: "1px solid #333" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 12 }}>
+                  Mistral OCR Configuration
+                </div>
+                <Input
+                  label="API Key"
+                  value={config.scanned.mistral_api_key}
+                  onChange={(v) => update("scanned.mistral_api_key", v)}
+                  type="password"
+                  placeholder="..."
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  Get your API key from the{" "}
+                  <a
+                    href="https://console.mistral.ai/api-keys/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#3b82f6" }}
+                  >
+                    Mistral Console
+                  </a>
+                </div>
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  Mistral OCR is a dedicated OCR API for scanned documents. Page range slicing is supported — only selected pages are uploaded for OCR.
+                </div>
+              </div>
+            )}
+          </>
         )}
       </Section>
 

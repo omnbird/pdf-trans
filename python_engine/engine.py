@@ -30,12 +30,15 @@ class TranslationEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         self.translator = Translator(config.translation)
+        # Only load the OCR model when the user has explicitly marked the PDF
+        # as scanned AND chose the local OCR backend. Loading it for digital
+        # PDFs is wasted work.
         self.ocr_engine = (
             PaddleOCREngine(
                 language=config.scanned.ocr_language,
                 on_loading=lambda msg: self._report_progress("processing", 5, 100, msg),
             )
-            if config.scanned.mode == "ocr"
+            if config.scanned.is_scanned and config.scanned.mode == "ocr"
             else None
         )
 
@@ -619,9 +622,9 @@ class TranslationEngine:
         """
         input_path = Path(input_path)
 
-        # Mistral OCR pipeline (completely independent, handles everything itself)
-        if self.config.scanned.mode == "mistral_ocr":
-            logger.info("[Engine] Mode=mistral_ocr, starting pipeline for %s", input_path)
+        # Mistral OCR pipeline — only used when the user marks the PDF as scanned
+        if self.config.scanned.is_scanned and self.config.scanned.mode == "mistral_ocr":
+            logger.info("[Engine] Starting Mistral OCR pipeline for %s", input_path)
             self._report_progress("processing", 0, 100, "Starting Mistral OCR pipeline...")
             try:
                 mistral_outputs = await self._run_mistral_pipeline(input_path)
@@ -643,14 +646,18 @@ class TranslationEngine:
 
         # Step 1: Process PDF
         self._report_progress("processing", 0, 100, "Processing PDF...")
+        is_scanned = self.config.scanned.is_scanned
         doc = process_pdf(
             input_path,
             scan_dpi=self.config.scanned.dpi,
             pages_str=self.config.pages,
-            ocr_engine=self.ocr_engine,
-            force_ocr=self.config.scanned.force_ocr,
+            ocr_engine=self.ocr_engine if is_scanned else None,
+            is_scanned=is_scanned,
         )
-        self._report_progress("processing", 20, 100, f"Detected {doc.pdf_type} PDF, {len(doc.pages)} pages selected")
+        self._report_progress(
+            "processing", 20, 100,
+            f"{'Scanned' if is_scanned else 'Digital'} PDF, {len(doc.pages)} pages selected",
+        )
 
         output_files: dict[str, str] = {}
         babeldoc_success = False

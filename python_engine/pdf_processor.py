@@ -268,24 +268,26 @@ def process_pdf(
     scan_dpi: int = 300,
     pages_str: str = "",
     ocr_engine: "PaddleOCREngine | None" = None,
-    force_ocr: bool = False,
+    is_scanned: bool = False,
 ) -> PDFDocument:
-    """Process a PDF file: detect type, extract text or render images.
+    """Process a PDF file: extract text or render images for OCR.
+
+    The caller decides whether the PDF is scanned via `is_scanned`. There is
+    no auto-detection — the user explicitly picks the mode.
 
     Args:
         path: Path to PDF file
         scan_dpi: DPI for rendering scanned pages
         pages_str: Optional page range string (e.g. "1-10" or "1,3,5")
-        ocr_engine: Optional OCR engine for scanned PDFs
-        force_ocr: If True, always treat as scanned and use OCR
+        ocr_engine: Optional OCR engine for scanned PDFs (only used when is_scanned=True)
+        is_scanned: If True, treat every page as scanned and render + OCR them
 
     Returns:
         PDFDocument with extracted data
     """
     path = Path(path)
     doc = fitz.open(path)
-    detected_type = detect_pdf_type(doc)
-    pdf_type = "scanned" if force_ocr else detected_type
+    pdf_type = "scanned" if is_scanned else "digital"
 
     # Parse page ranges
     page_indices = parse_page_ranges(pages_str, len(doc))

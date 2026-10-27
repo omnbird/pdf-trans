@@ -78,12 +78,18 @@ class OutputConfig(BaseModel):
 
 
 class ScannedConfig(BaseModel):
-    """Scanned PDF processing configuration."""
+    """Scanned PDF processing configuration.
 
+    The user explicitly sets `is_scanned` for the PDF they are translating.
+    When False, the engine treats the PDF as digital and skips the OCR
+    pipeline entirely. When True, it uses the configured `mode` (PaddleOCR,
+    Vision API, or Mistral OCR) to extract text.
+    """
+
+    is_scanned: bool = False  # user explicitly marks the input PDF as scanned
     mode: Literal["ocr", "vision", "mistral_ocr"] = "ocr"
     dpi: int = 150
     ocr_language: str = "en"
-    force_ocr: bool = False  # override auto-detection, always use OCR/vision pipeline
     mistral_api_key: str = ""  # API key for Mistral OCR mode
 
 

@@ -33,9 +33,9 @@ export interface AppConfig {
     model: string;
   };
   scanned: {
+    is_scanned: boolean;
     mode: "ocr" | "vision" | "mistral_ocr";
     dpi: number;
-    force_ocr: boolean;
     mistral_api_key: string;
   };
 }
@@ -81,9 +81,9 @@ Chinese translation:`,
     model: "gemini-2.5-flash-preview-04-17",
   },
   scanned: {
+    is_scanned: false,
     mode: "ocr",
     dpi: 150,
-    force_ocr: false,
     mistral_api_key: "",
   },
 };
@@ -103,6 +103,10 @@ function App() {
       if (saved && Object.keys(saved).length > 0) {
         // Deep-merge one level so newly-added fields (e.g. default_output_dir)
         // keep their defaults when the saved config predates them.
+        // Strip fields removed in newer versions (e.g. force_ocr) so the
+        // runtime object matches the current AppConfig shape.
+        const savedScanned = { ...(saved.scanned || {}) };
+        delete (savedScanned as Record<string, unknown>).force_ocr;
         setConfig((prev) => ({
           ...prev,
           ...saved,
@@ -110,7 +114,7 @@ function App() {
             rate_limit: { ...prev.translation.rate_limit, ...((saved.translation || {}).rate_limit || {}) } },
           output: { ...prev.output, ...(saved.output || {}) },
           vision: { ...prev.vision, ...(saved.vision || {}) },
-          scanned: { ...prev.scanned, ...(saved.scanned || {}) },
+          scanned: { ...prev.scanned, ...savedScanned },
         }));
       }
     });

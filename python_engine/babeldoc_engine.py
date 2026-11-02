@@ -20,6 +20,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 from python_engine.config import EngineConfig
+from python_engine import diagnostics
 
 
 class CustomOpenAITranslator(OpenAITranslator):
@@ -31,9 +32,50 @@ class CustomOpenAITranslator(OpenAITranslator):
         # Merge user-configured extra body fields (e.g. disable thinking)
         # into whatever BabelDOC set up. BabelDOC's do_translate() sends
         # self.extra_body with every chat.completions request.
-        extra_body = dict(config.translation.extra_body or {})
-        if extra_body:
-            self.extra_body.update(extra_body)
+        self._extra_body = dict(config.translation.extra_body or {})
+        if self._extra_body:
+            self.extra_body.update(self._extra_body)
+            self._install_extra_body_shim()
+
+    def _install_extra_body_shim(self) -> None:
+        """Inject extra_body at the HTTP client level as well.
+
+        BabelDOC passes ``self.extra_body`` in most releases, but that plumbing
+        has changed across versions (and is silently dropped by some forks).
+        Wrapping ``chat.completions.create`` guarantees the thinking-off switch
+        actually reaches the wire no matter which BabelDOC is installed.
+        """
+        try:
+            completions = self.client.chat.completions
+            original_create = completions.create
+        except AttributeError:  # pragma: no cover - unexpected client layout
+            return
+
+        extra = dict(self._extra_body)
+
+        def create_with_extra_body(*args, **kwargs):
+            merged = dict(kwargs.get("extra_body") or {})
+            merged.update(extra)
+            kwargs["extra_body"] = merged
+            return original_create(*args, **kwargs)
+
+        try:
+            completions.create = create_with_extra_body
+        except Exception:  # pragma: no cover - read-only attribute
+            pass
+
+    def update_token_count(self, response):
+        """BabelDOC hook (called once per API response) — record what we sent/received."""
+        try:
+            super().update_token_count(response)
+        except AttributeError:  # pragma: no cover - very old BabelDOC
+            pass
+        diagnostics.tracker.record(
+            model=getattr(self, "model", ""),
+            extra_body=getattr(self, "extra_body", {}),
+            usage=getattr(response, "usage", None),
+            stage="babeldoc",
+        )
 
     def prompt(self, text):
         """Override prompt to inject astrology/vedic domain context."""

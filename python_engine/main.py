@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from python_engine.config import EngineConfig, load_config
+from python_engine import diagnostics
 from python_engine.engine import TranslationEngine
 
 
@@ -69,8 +70,32 @@ async def main() -> int:
     # Setup logging — must go to stderr because stdout is reserved for JSON events
     log_level = logging.DEBUG if config.debug else logging.INFO
     _setup_logging(log_level)
+    # Persist logs to a file as well: the packaged app hides stderr, so without
+    # this there is no way to check what was actually sent to the API.
+    log_file = diagnostics.configure()
     logger = logging.getLogger(__name__)
+    diagnostics.reset()
     logger.info("Engine starting: input=%s pages=%s mode=%s", args.input, config.pages, config.scanned.mode)
+
+    # Echo the effective request configuration so a missing/ineffective
+    # thinking-off switch is visible immediately instead of showing up on the bill.
+    logger.info(
+        "[config] base_url=%s model=%s temperature=%s max_tokens=%s",
+        config.translation.base_url,
+        config.translation.model,
+        config.translation.temperature,
+        config.translation.max_tokens,
+    )
+    if config.translation.extra_body:
+        logger.info("[config] extra_body=%s", config.translation.extra_body)
+    else:
+        logger.warning(
+            "[config] extra_body is EMPTY — nothing is disabling reasoning. "
+            "Hybrid-reasoning models (doubao-seed-2.x, Qwen3, Gemini 2.5) will "
+            "emit thinking tokens that are billed as OUTPUT."
+        )
+    if log_file:
+        logger.info("[config] diagnostics log: %s", log_file)
 
     # Resolve output_dir: CLI flag wins, otherwise fall back to the user-facing
     # output.default_output_dir UI setting. Expand `~` so paths like
@@ -88,10 +113,12 @@ async def main() -> int:
 
     try:
         output_files = await engine.translate_document(args.input)
+        diagnostics.tracker.log_summary()
         if not output_files:
             return 1
         return 0
     except Exception as e:
+        diagnostics.tracker.log_summary()
         msg = str(e)
         # Truncate very long messages for UI display
         if len(msg) > 800:

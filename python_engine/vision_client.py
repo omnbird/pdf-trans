@@ -16,6 +16,7 @@ import openai
 from PIL import Image
 
 from python_engine.config import VisionConfig
+from python_engine import diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,12 @@ class VisionClient:
         )
 
         content = response.choices[0].message.content or ""
+        diagnostics.tracker.record(
+            model=self.model,
+            extra_body=self.extra_body,
+            usage=getattr(response, "usage", None),
+            stage="vision",
+        )
         # Strip markdown code fences if the model wrapped output in ```markdown
         content = content.strip()
         if content.startswith("```markdown"):

@@ -23,6 +23,7 @@ from tenacity import (
 )
 
 from python_engine.config import TranslationConfig
+from python_engine import diagnostics
 from python_engine.rate_limiter import RateLimit, TokenBucketRateLimiter
 
 
@@ -122,6 +123,12 @@ class Translator:
 
         translated = response.choices[0].message.content.strip()
         tokens_used = response.usage.total_tokens if response.usage else 0
+        diagnostics.tracker.record(
+            model=self.model,
+            extra_body=self.extra_body,
+            usage=response.usage,
+            stage="translate",
+        )
 
         return TranslationResult(
             original=text,

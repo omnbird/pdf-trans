@@ -55,6 +55,15 @@ class TranslationEngine:
 
     def _report_finish(self, output_files: dict[str, str]) -> None:
         """Report completion with output file paths."""
+        # Surface the token/cost summary in the UI too, so a runaway
+        # thinking-bill is visible immediately after a short test run.
+        try:
+            from python_engine import diagnostics
+
+            if diagnostics.tracker.requests:
+                self._report_progress("usage", 100, 100, diagnostics.tracker.short_summary())
+        except Exception:  # never let diagnostics break the run
+            pass
         event = {
             "type": "finish",
             "output_files": output_files,

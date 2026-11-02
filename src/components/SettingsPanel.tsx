@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AppConfig } from "../App";
 import { saveConfig, testApiConnection } from "../hooks/useTranslation";
@@ -7,6 +7,16 @@ interface Props {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
 }
+
+// One-click presets for turning off reasoning/thinking. Hybrid-reasoning
+// models otherwise emit large amounts of thinking tokens that providers bill
+// as output — for pure translation this can multiply the bill by ~5–10×.
+const DISABLE_THINKING_PRESETS: { label: string; body: Record<string, unknown> }[] = [
+  { label: "豆包 / 方舟 / GLM / DeepSeek", body: { thinking: { type: "disabled" } } },
+  { label: "Qwen / DashScope", body: { enable_thinking: false } },
+  { label: "Gemini", body: { google: { thinking_config: { thinking_budget: 0 } } } },
+  { label: "OpenAI o 系列", body: { reasoning_effort: "minimal" } },
+];
 
 export default function SettingsPanel({ config, onChange }: Props) {
   const [saveStatus, setSaveStatus] = useState("");
@@ -431,6 +441,16 @@ function ExtraBodyInput({
   );
   const [error, setError] = useState("");
 
+  // Keep the textarea in sync when the value is changed from outside
+  // (e.g. by a preset button). Invalid local text is not propagated, so
+  // this only fires on real external changes.
+  const serialized = JSON.stringify(value || {});
+  useEffect(() => {
+    const obj = JSON.parse(serialized) as Record<string, unknown>;
+    setText(Object.keys(obj).length ? JSON.stringify(obj, null, 2) : "");
+    setError("");
+  }, [serialized]);
+
   const handleChange = (raw: string) => {
     setText(raw);
     const trimmed = raw.trim();
@@ -457,6 +477,39 @@ function ExtraBodyInput({
       <label style={{ display: "block", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
         Extra Request Body (JSON, optional)
       </label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {DISABLE_THINKING_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => onChange(p.body)}
+            style={{
+              padding: "6px 10px",
+              fontSize: 12,
+              background: "#1a1a1a",
+              color: "#ccc",
+              border: "1px solid #333",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          onClick={() => onChange({})}
+          style={{
+            padding: "6px 10px",
+            fontSize: 12,
+            background: "transparent",
+            color: "#888",
+            border: "1px solid #2a2a2a",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          Clear
+        </button>
+      </div>
       <textarea
         value={text}
         onChange={(e) => handleChange(e.target.value)}
@@ -480,11 +533,10 @@ function ExtraBodyInput({
         <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>{error}</div>
       ) : (
         <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-          Merged into every chat.completions request. To disable reasoning/thinking:
-          Gemini <code>{'{"google": {"thinking_config": {"thinking_budget": 0}}}'}</code>;
-          Qwen <code>{'{"enable_thinking": false}'}</code>;
-          GLM/DeepSeek <code>{'{"thinking": {"type": "disabled"}}'}</code>;
-          OpenAI <code>{'{"reasoning_effort": "minimal"}'}</code>.
+          Merged into every chat.completions request. Hybrid-reasoning models
+          (e.g. doubao-seed-2.1, Qwen3, Gemini 2.5) think by default and bill
+          those tokens as <b>output</b> — usually 5–10× the cost of the actual
+          translation. Use a preset above to turn that off.
         </div>
       )}
     </div>

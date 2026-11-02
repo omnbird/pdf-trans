@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AppConfig } from "../App";
 import { saveConfig, testApiConnection } from "../hooks/useTranslation";
+import { isWebMode } from "../lib/bridge";
 
 interface Props {
   config: AppConfig;
@@ -211,7 +212,8 @@ export default function SettingsPanel({ config, onChange }: Props) {
                 outline: "none",
               }}
             />
-            <button
+            {!isWebMode() && (
+              <button
               onClick={async () => {
                 const selected = await openDialog({
                   directory: true,
@@ -235,9 +237,12 @@ export default function SettingsPanel({ config, onChange }: Props) {
             >
               Browse
             </button>
+            )}
           </div>
           <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-            Translated PDFs and Markdown files are saved to this folder.
+            {isWebMode()
+              ? "Web mode: files are written on the server (~/pdf-trans-web/outputs) and offered as downloads."
+              : "Translated PDFs and Markdown files are saved to this folder."}
           </div>
         </div>
 

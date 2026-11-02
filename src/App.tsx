@@ -3,6 +3,7 @@ import FileUpload from "./components/FileUpload";
 import SettingsPanel from "./components/SettingsPanel";
 import ProgressBar from "./components/ProgressBar";
 import { translatePdf, loadConfig, cancelTranslation } from "./hooks/useTranslation";
+import { baseName, fileUrl } from "./lib/bridge";
 
 export interface AppConfig {
   translation: {
@@ -269,12 +270,26 @@ function App() {
                     <div style={{ fontWeight: 600, marginBottom: 8 }}>File {i + 1}</div>
                     {r.pdf && (
                       <div style={{ color: "#3b82f6" }}>
-                        PDF: {r.pdf}
+                        PDF:{" "}
+                        {fileUrl(r.pdf) ? (
+                          <a href={fileUrl(r.pdf)!} style={{ color: "#3b82f6" }}>
+                            {baseName(r.pdf)} (download)
+                          </a>
+                        ) : (
+                          r.pdf
+                        )}
                       </div>
                     )}
                     {r.markdown && (
                       <div style={{ color: "#10b981" }}>
-                        Markdown: {r.markdown}
+                        Markdown:{" "}
+                        {fileUrl(r.markdown) ? (
+                          <a href={fileUrl(r.markdown)!} style={{ color: "#10b981" }}>
+                            {baseName(r.markdown)} (download)
+                          </a>
+                        ) : (
+                          r.markdown
+                        )}
                       </div>
                     )}
                   </div>

@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  baseName,
+  getPdfInfo,
+  isWebMode,
+  pickPdfFiles,
+  uploadToServer,
+} from "../lib/bridge";
 
 interface FileInfo {
   path: string;
@@ -29,20 +36,21 @@ export default function FileUpload({
       const infos: FileInfo[] = [];
       for (const path of files) {
         try {
-          const info = await invoke<{ size: number; pages: number }>(
-            "get_pdf_info",
-            { filePath: path }
-          );
+          const info = isWebMode()
+            ? await getPdfInfo(path)
+            : await invoke<{ size: number; pages: number }>("get_pdf_info", {
+                filePath: path,
+              });
           infos.push({
             path,
-            name: path.split("/").pop() || path,
+            name: baseName(path),
             size: info.size,
             pages: info.pages,
           });
         } catch {
           infos.push({
             path,
-            name: path.split("/").pop() || path,
+            name: baseName(path),
             size: 0,
             pages: 0,
           });
@@ -61,6 +69,13 @@ export default function FileUpload({
   };
 
   const handleSelect = async () => {
+    if (isWebMode()) {
+      const picked = await pickPdfFiles();
+      if (picked.length === 0) return;
+      const paths = await Promise.all(picked.map((f) => uploadToServer(f)));
+      onChange([...files, ...paths]);
+      return;
+    }
     const selected = await open({
       multiple: true,
       filters: [{ name: "PDF", extensions: ["pdf"] }],
@@ -70,14 +85,22 @@ export default function FileUpload({
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = Array.from(e.dataTransfer.files)
-      .filter((f) => f.name.endsWith(".pdf"))
-      .map((f) => (f as any).path || f.name);
-    if (dropped.length > 0) {
-      onChange([...files, ...dropped]);
+    const dropped = Array.from(e.dataTransfer.files).filter((f) =>
+      f.name.toLowerCase().endsWith(".pdf")
+    );
+    if (dropped.length === 0) return;
+
+    if (isWebMode()) {
+      // In the browser a dropped File has no filesystem path, so upload it first.
+      const paths = await Promise.all(dropped.map((f) => uploadToServer(f)));
+      onChange([...files, ...paths]);
+      return;
     }
+
+    const localPaths = dropped.map((f) => (f as any).path || f.name);
+    onChange([...files, ...localPaths]);
   };
 
   return (

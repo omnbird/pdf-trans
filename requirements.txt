@@ -18,6 +18,19 @@ aiohttp>=3.9.0
 # Image processing
 Pillow>=10.0.0
 
+# Numeric (imported by ocr_engine even when PaddleOCR is not installed)
+numpy>=1.26
+
+# Layout-preserving PDF translation (used for digital PDFs).
+# NOTE: babeldoc 0.6.4 imports `bitstring.BitStream`, which was removed in
+# bitstring 4.2 — the pin below keeps it working despite babeldoc's metadata
+# claiming >=4.3.0.
+babeldoc>=0.6.4
+bitstring>=4.1,<4.2
+
+# Web front-end (web/server.py)
+#   run with the project venv:  .venv/bin/python -m web.server --port 8123
+
 # OCR (optional for scanned mode, heavy - install separately if needed)
 # paddleocr>=2.7.0
 

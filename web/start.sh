@@ -6,9 +6,17 @@ cd "$(dirname "$0")/.."
 
 PORT="${1:-${PORT:-8123}}"
 
+# Prefer the project venv (it has babeldoc, so layout-preserving PDF output
+# works). Fall back to the system interpreter with a warning.
+PY=".venv/bin/python"
+if [ ! -x "$PY" ]; then
+  echo "warning: .venv not found — babeldoc (layout-preserving PDF) will be unavailable" >&2
+  PY="$(command -v python3)"
+fi
+
 if [ ! -f dist/index.html ]; then
   echo "dist/ not found — building frontend…"
   npm run build
 fi
 
-exec python3 -m web.server --port "$PORT"
+exec "$PY" -m web.server --port "$PORT"

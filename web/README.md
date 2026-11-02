@@ -24,14 +24,14 @@ by their server-side path, so the rest of the UI is unchanged.
 ## Run
 
 ```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt   # includes babeldoc
 npm install          # once
 npm run build        # produces dist/ (required by the server)
-python3 -m web.server --port 8123
+web/start.sh 8123    # uses .venv/bin/python automatically, falls back to python3
 ```
 
 Then open `http://<host>:8123/`.
-
-Python deps: `openai pydantic toml tenacity pillow pymupdf reportlab numpy aiohttp`.
 
 ## Notes
 
@@ -40,5 +40,10 @@ Python deps: `openai pydantic toml tenacity pillow pymupdf reportlab numpy aioht
 - Diagnostics of every run (effective `extra_body`, prompt/completion/reasoning
   tokens, estimated cost) are written to `~/.config/pdf-trans/diagnostics.log`
   and are also visible at `/api/log?lines=200`.
-- `BabelDOC` is not required: digital PDFs fall back to the layout pipeline when
-  it is missing (PDF output still works, just without original-text overlay).
+- `BabelDOC` is used for digital PDFs when available (`.venv`). Its layout model
+  and fonts are downloaded on first run from ModelScope (~100 MB) into
+  `~/.cache/babeldoc`; without it the engine falls back to the reportlab
+  pipeline (PDF output still works, just without the original-text overlay).
+- BabelDOC caches translations in `~/.cache/babeldoc/cache.v1.db`. Deleting that
+  file forces a re-translation — needed when a previous run stored fallback
+  (untranslated) results.

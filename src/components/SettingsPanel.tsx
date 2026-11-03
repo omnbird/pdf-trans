@@ -89,18 +89,6 @@ export default function SettingsPanel({ config, onChange }: Props) {
           onChange={(v) => update("translation.model", v)}
           placeholder="deepseek-chat"
         />
-        <Input
-          label="Max output tokens per request"
-          value={String(config.translation.max_tokens)}
-          onChange={(v) => update("translation.max_tokens", parseInt(v) || 4096)}
-          type="number"
-        />
-        <div style={{ fontSize: 12, color: "#666", marginTop: -8, marginBottom: 12 }}>
-          Caps one response. This is what limits paragrapahs per request: a chunk must fit
-          entirely inside it, and oversized chunks get auto-split (extra requests, no lost text).
-          On modern models (doubao-seed-2.x supports 256k output) you can raise this to e.g. 8192
-          and then allow bigger batches.
-        </div>
         <ExtraBodyInput
           value={config.translation.extra_body}
           onChange={(v) => update("translation.extra_body", v)}
@@ -167,7 +155,21 @@ export default function SettingsPanel({ config, onChange }: Props) {
           onChange={(v) => update("translation.glossary", v)}
         />
 
+      </Section>
+
+      {/* Advanced (collapsed by default) */}
+      <Section title="Advanced" collapsible>
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 16 }}>
+          Defaults are tuned for translation and normally need no changes. Everything here
+          degrades gracefully: chunks that do not fit are split automatically.
+        </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Input
+            label="Max output tokens per request"
+            value={String(config.translation.max_tokens)}
+            onChange={(v) => update("translation.max_tokens", parseInt(v) || 4096)}
+            type="number"
+          />
           <Input
             label="Paragraphs per request"
             value={String(config.translation.batch_size)}
@@ -175,7 +177,7 @@ export default function SettingsPanel({ config, onChange }: Props) {
             type="number"
           />
           <Input
-            label="Max chars per request"
+            label="Max chars per request (0 = auto)"
             value={String(config.translation.batch_char_limit)}
             onChange={(v) => update("translation.batch_char_limit", parseInt(v) || 0)}
             type="number"
@@ -194,17 +196,17 @@ export default function SettingsPanel({ config, onChange }: Props) {
           />
         </div>
         <div style={{ fontSize: 12, color: "#666", marginTop: -8 }}>
-          <b>Paragraphs per request</b> bundles segments so the model sees neighbouring text.
-          It is limited by <i>max_tokens</i>: a response must hold every translation in the
-          chunk, and oversized chunks are auto-split on truncation (never lost).
-          <b> Prev-paragraph context</b> prepends the tail of the previous chunk as read-only
-          context; <b>book digest</b> puts the opening of the document into every system prompt
-          (0 disables). BabelDOC batches internally and ignores the first two.
+          <b>Max output tokens</b> caps one response — the real limit on how much can be
+          translated at once (4096 is the provider default; doubao-seed-2.1 allows 256k).
+          <b> Max chars per request</b> at 0 is derived from it (≈ max_tokens × 2).
+          <b> Prev-paragraph context</b> prepends the previous chunk's tail as read-only context;
+          <b> book digest</b> puts the document opening into every system prompt (0 disables).
+          BabelDOC batches internally and ignores the two batching knobs.
         </div>
       </Section>
 
       {/* Prompt Template */}
-      <Section title="Prompt Template">
+      <Section title="Prompt Template" collapsible>
         <textarea
           value={config.translation.prompt_template}
           onChange={(e) => update("translation.prompt_template", e.target.value)}
@@ -228,7 +230,7 @@ export default function SettingsPanel({ config, onChange }: Props) {
       </Section>
 
       {/* Rate Limit */}
-      <Section title="Rate Limit">
+      <Section title="Rate Limit" collapsible>
         <Select
           label="Mode"
           value={config.translation.rate_limit.mode}
@@ -707,22 +709,48 @@ function ExtraBodyInput({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  collapsible = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  collapsible?: boolean;
+}) {
+  const cardStyle: React.CSSProperties = {
+    background: "#111",
+    border: "1px solid #222",
+    borderRadius: 12,
+    padding: 24,
+    marginBottom: 20,
+  };
+  const headingStyle: React.CSSProperties = {
+    fontSize: 16,
+    fontWeight: 600,
+    marginBottom: 16,
+    color: "#fff",
+  };
+
+  if (!collapsible) {
+    return (
+      <div style={cardStyle}>
+        <h2 style={headingStyle}>{title}</h2>
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        background: "#111",
-        border: "1px solid #222",
-        borderRadius: 12,
-        padding: 24,
-        marginBottom: 20,
-      }}
-    >
-      <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: "#fff" }}>
+    <details style={cardStyle}>
+      <summary style={{ ...headingStyle, marginBottom: 0, cursor: "pointer" }}>
         {title}
-      </h2>
-      {children}
-    </div>
+        <span style={{ fontSize: 12, color: "#666", fontWeight: 400, marginLeft: 8 }}>
+          (advanced)
+        </span>
+      </summary>
+      <div style={{ marginTop: 16 }}>{children}</div>
+    </details>
   );
 }
 

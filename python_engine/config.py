@@ -47,6 +47,8 @@ class TranslationConfig(BaseModel):
     model: str = "deepseek-chat"
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE
     temperature: float = 0.3
+    # Output cap per request. Providers default to 4096 (doubao-seed-2.1 allows
+    # up to 256k); raise it to allow bigger chunks in one response.
     max_tokens: int = 4096
     # Free-form description of the document: title, author, field, audience,
     # style/terminology rules. Injected into the system prompt of every request
@@ -59,10 +61,13 @@ class TranslationConfig(BaseModel):
     # Legacy/OCR pipelines translate a chunk of paragraphs per request so the
     # model sees neighbouring text (context) and prompt overhead is amortised.
     # 1 disables batching (one request per paragraph, the old behaviour).
-    # NOTE: batch size is bounded by max_tokens (one response must hold every
-    # translation in the chunk); oversized chunks are auto-split on truncation.
+    # NOTE: a chunk's whole translation must fit into one response, i.e. into
+    # max_tokens (providers default to 4096; doubao-seed-2.1 allows 256k).
+    # Oversized chunks are auto-split on truncation, so this is a throughput
+    # knob, not a correctness one.
     batch_size: int = 12
-    batch_char_limit: int = 6000
+    # 0 = auto: derived from max_tokens in Translator._chunk_segments().
+    batch_char_limit: int = 0
     # Characters of the *previous* chunk's source text included in each request
     # as "preceding text, do not translate" — gives continuity across chunks.
     context_window_chars: int = 800

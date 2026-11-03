@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -79,7 +79,13 @@ pub async fn translate_pdf(
     let engine_path = resolve_project_path("python_engine/main.py");
 
     if !engine_path.exists() {
-        return Err(format!("Engine not found at: {}", engine_path.display()));
+        return Err(format!(
+            "Engine not found at: {}.\n\nSearched: $PDF_TRANS_HOME, current directory, \
+             the app bundle, the last used project dir and ~/fullstack/pdf-trans.\n\
+             Point the app at the source checkout with: \
+             launchctl setenv PDF_TRANS_HOME /path/to/pdf-trans  (then restart the app)",
+            engine_path.display()
+        ));
     }
 
     // Project root is the parent directory of python_engine/
@@ -88,6 +94,7 @@ pub async fn translate_pdf(
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
+    remember_project_dir(&project_root);
 
     // Build command: use `python -m python_engine.main` so Python can find the package.
     // The output directory is controlled entirely by config.output.default_output_dir
@@ -310,6 +317,7 @@ pub async fn test_api_connection(config_json: String) -> Result<TestConnectionRe
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
+    remember_project_dir(&project_root);
 
     // NOTE: raw string (no format!) so the Python braces need no escaping.
     // Reports the request parameters and token usage, mirroring the web server's
@@ -464,20 +472,87 @@ fn find_python() -> String {
     "python3".to_string()
 }
 
-/// Resolve a project-relative path.
-/// When running from `src-tauri/` (dev mode), checks the parent directory.
-fn resolve_project_path(rel: &str) -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let in_cwd = cwd.join(rel);
-    if in_cwd.exists() {
-        return in_cwd;
+/// File that remembers where the source checkout lives (see remember_project_dir).
+fn project_dir_file() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("pdf-trans").join("project_dir.txt"))
+}
+
+/// Remember where the Python engine lives. A bundled .app launched from Finder
+/// has cwd = "/", so without this the engine can never be found.
+fn remember_project_dir(dir: &Path) {
+    // Only persist a directory that actually contains the engine.
+    if !dir.join("python_engine").join("main.py").exists() {
+        return;
     }
-    // If cwd is src-tauri/, check parent directory
-    if let Some(parent) = cwd.parent() {
-        let in_parent = parent.join(rel);
-        if in_parent.exists() {
-            return in_parent;
+    if let Some(file) = project_dir_file() {
+        if let Some(parent) = file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(file, dir.to_string_lossy().as_bytes());
+    }
+}
+
+/// Resolve a project-relative path.
+///
+/// Search order (first hit wins):
+///   1. $PDF_TRANS_HOME                     (explicit override)
+///   2. current directory and its parent    (npm run tauri dev / running from src-tauri)
+///   3. the executable's directory + ancestors (inside a .app bundle)
+///   4. the project directory remembered from a previous run
+///   5. common development locations under $HOME
+fn resolve_project_path(rel: &str) -> PathBuf {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(home) = std::env::var("PDF_TRANS_HOME") {
+        if !home.trim().is_empty() {
+            candidates.push(PathBuf::from(home));
         }
     }
-    in_cwd
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    candidates.push(cwd.clone());
+    if let Some(parent) = cwd.parent() {
+        candidates.push(parent.to_path_buf());
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        for _ in 0..4 {
+            if let Some(d) = dir {
+                candidates.push(d.clone());
+                dir = d.parent().map(|p| p.to_path_buf());
+            } else {
+                break;
+            }
+        }
+    }
+
+    if let Some(file) = project_dir_file() {
+        if let Ok(saved) = std::fs::read_to_string(&file) {
+            let saved = saved.trim();
+            if !saved.is_empty() {
+                candidates.push(PathBuf::from(saved));
+            }
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        for rel_dir in [
+            "fullstack/pdf-trans",
+            "projects/pdf-trans",
+            "Documents/pdf-trans",
+            "pdf-trans",
+        ] {
+            candidates.push(home.join(rel_dir));
+        }
+    }
+
+    for base in &candidates {
+        let candidate = base.join(rel);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    cwd.join(rel)
 }

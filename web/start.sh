@@ -14,11 +14,12 @@ if [ ! -x "$PY" ]; then
   PY="$(command -v python3)"
 fi
 
-# Apply the optional BabelDOC typesetting fix (CJK paragraphs that are only
-# slightly too long get shrunk instead of using the free space below them).
-# Idempotent; skip with PDF_TRANS_NO_BABELDOC_PATCH=1.
-if [ "${PDF_TRANS_NO_BABELDOC_PATCH:-0}" != "1" ] && [ -x "$PY" ]; then
-  "$PY" scripts/patch_babeldoc_typesetting.py >/dev/null 2>&1 || true
+# Optional BabelDOC typesetting tweaks — see scripts/patch_babeldoc_typesetting.py.
+# Off by default (measurements show they only help marginally). Opt in with:
+#   PDF_TRANS_BABELDOC_LINE_SKIP=1.3 web/start.sh
+if [ -n "${PDF_TRANS_BABELDOC_LINE_SKIP:-}" ] && [ -x "$PY" ]; then
+  "$PY" scripts/patch_babeldoc_typesetting.py \
+    --line-skip "$PDF_TRANS_BABELDOC_LINE_SKIP" >/dev/null 2>&1 || true
 fi
 
 if [ ! -f dist/index.html ]; then

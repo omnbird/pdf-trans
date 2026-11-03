@@ -47,25 +47,40 @@ Settings → *Document Context & Glossary* / *Translation API*:
 | `max_tokens` | Output cap per request. Raise it (e.g. 8192) together with `batch_char_limit` if you want bigger chunks. |
 | `extra_body` | Provider-specific JSON merged into the request body — used to turn off thinking (see the preset buttons). |
 
-## CJK typesetting fix (optional)
+## CJK typesetting (optional tweaks)
 
-BabelDOC typesets the translation inside the original paragraph box. CJK needs
-more vertical space (line-skip 1.5 vs 1.3), so a paragraph that is only slightly
-too long is rendered at a smaller font — e.g. 9.35pt instead of 11pt — even when
-the page has free space below. Measured on a 551-page book: **521 of 3693
-paragraphs (14.1%)** were shrunk this way.
+BabelDOC typesets each translation inside the original paragraph box and shrinks
+the font until it fits. CJK uses a 1.5 line-skip (Latin 1.3), so a Chinese
+paragraph of the same length needs ~15% more vertical space and is rendered
+smaller — 11pt → 9.35pt. Measured on a 551-page book: 521 of 3693 paragraphs
+(14.1%) were shrunk, so it is normal, not a bug.
 
-`scripts/patch_babeldoc_typesetting.py` raises the threshold at which BabelDOC
-starts expanding the box (0.7 → 0.9), so those paragraphs keep their font size:
+Measured on 20 pages with *identical* translations (cache hits, so the only
+variable is typesetting):
+
+| variant | bottom paragraph |
+|---|---|
+| vanilla BabelDOC | 9.35pt |
+| `--expand-threshold 0.9` | 9.35pt (no change) |
+| `--line-skip 1.3` | 10.45pt |
+| both | 10.45pt |
+
+No variant overflowed the page: expansion is bounded by the page cropbox and by
+any block below with horizontal overlap, and without room BabelDOC falls back to
+shrinking. Lowest text bottom stayed at y=635.8 of a 666pt page, and patched
+output was otherwise identical.
+
+Conclusion: at 11pt that paragraph simply does not fit, so there is no free fix.
+`--line-skip 1.3` is the closest improvement and changes the look of every page
+(denser lines) — hence opt-in:
 
 ```bash
-.venv/bin/python scripts/patch_babeldoc_typesetting.py            # apply
-.venv/bin/python scripts/patch_babeldoc_typesetting.py --revert   # undo
+.venv/bin/python scripts/patch_babeldoc_typesetting.py --line-skip 1.3
+.venv/bin/python scripts/patch_babeldoc_typesetting.py --revert
+# or, for the web server:  PDF_TRANS_BABELDOC_LINE_SKIP=1.3 web/start.sh
 ```
 
-`web/start.sh` applies it automatically (set `PDF_TRANS_NO_BABELDOC_PATCH=1` to
-skip). It is a one-line edit of `babeldoc/.../typesetting.py` inside the venv, so
-re-installing/upgrading babeldoc requires re-running it.
+Re-installing/upgrading babeldoc drops the patch.
 
 ## Notes
 

@@ -35,12 +35,16 @@ pub async fn get_pdf_info(file_path: String) -> Result<PdfInfo, String> {
     // /api/test-connection, so "is thinking actually off?" is visible in the UI.
     let script = r#"import asyncio, json, sys
 from python_engine.config import EngineConfig
+from python_engine import diagnostics
 from openai import AsyncOpenAI
 
 
 async def test():
     cfg = EngineConfig.from_dict(json.loads(sys.argv[1]))
     tr = cfg.translation
+    # Make the probe leave a trace in the same diagnostics log as translations,
+    # so "extra_body was really sent" can be checked after the fact.
+    log_path = diagnostics.configure()
 
     base = tr.base_url.rstrip("/")
     if base.endswith("/chat/completions"):
@@ -72,6 +76,12 @@ async def test():
             parts.append(f"reasoning={reasoning_tokens} -> thinking is ON (billed as output)")
         else:
             parts.append("reasoning=0")
+        if log_path:
+            parts.append(f"log={log_path}")
+        diagnostics.tracker.record(
+            model=tr.model, extra_body=extra_body, usage=usage, stage="test-connection"
+        )
+        diagnostics.tracker.log_summary()
         print(json.dumps({"success": True, "message": " | ".join(parts)}))
     except Exception as e:
         msg = str(e)

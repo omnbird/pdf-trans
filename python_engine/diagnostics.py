@@ -59,6 +59,10 @@ def configure(enable_file: bool = True) -> Path | None:
         pass
 
     root = logging.getLogger()
+    # A bare subprocess (e.g. the Test Connection probe) has no logging setup,
+    # so the root logger sits at WARNING and our INFO lines would vanish.
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
     for handler in root.handlers:
         if isinstance(handler, logging.FileHandler) and handler.baseFilename == str(path):
             return path

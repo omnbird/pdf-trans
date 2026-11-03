@@ -268,7 +268,9 @@ async def test_connection(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "message": "API key is empty"})
 
     from openai import AsyncOpenAI
+    from python_engine import diagnostics
 
+    log_path = diagnostics.configure()
     client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=60.0)
     try:
         response = await client.chat.completions.create(
@@ -295,6 +297,12 @@ async def test_connection(request: web.Request) -> web.Response:
             f"reasoning={reasoning} -> thinking is ON (billed as output)"
             if reasoning else "reasoning=0"
         )
+        if log_path:
+            parts.append(f"log={log_path}")
+        diagnostics.tracker.record(
+            model=model, extra_body=extra_body, usage=usage, stage="test-connection"
+        )
+        diagnostics.tracker.log_summary()
         return web.json_response({"success": True, "message": " | ".join(parts)})
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         return web.json_response({"success": False, "message": f"{type(exc).__name__}: {exc}"})

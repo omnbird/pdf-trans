@@ -19,6 +19,8 @@ export interface AppConfig {
     batch_char_limit: number;
     context_window_chars: number;
     context_digest_chars: number;
+    auto_extract_glossary: boolean;
+    term_pool_max_workers: number;
     extra_body: Record<string, unknown>;
     rate_limit: {
       mode: "rpm" | "concurrent" | "custom";
@@ -76,6 +78,8 @@ Chinese translation:`,
     batch_char_limit: 0,
     context_window_chars: 800,
     context_digest_chars: 1500,
+    auto_extract_glossary: false,
+    term_pool_max_workers: 0,
     extra_body: {},
     rate_limit: {
       mode: "rpm",

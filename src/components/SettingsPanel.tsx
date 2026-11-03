@@ -195,6 +195,23 @@ export default function SettingsPanel({ config, onChange }: Props) {
             type="number"
           />
         </div>
+        <CheckBox
+          label="Auto-extract glossary before translating (BabelDOC pre-pass)"
+          checked={config.translation.auto_extract_glossary}
+          onChange={(checked) => update("translation.auto_extract_glossary", checked)}
+        />
+        <div style={{ fontSize: 12, color: "#666", marginTop: 4, marginBottom: 16 }}>
+          Off by default. When on, BabelDOC sends roughly one request per 12 paragraphs to
+          build a glossary <i>before</i> translating — on a 500-page book that is 500+ extra
+          requests and 15+ minutes (visible as “Automatic Term Extraction: 3412/3437”).
+          Your own Document Context and Glossary already cover most of the benefit.
+        </div>
+        <Input
+          label="Term-extraction workers (0 = same as pool)"
+          value={String(config.translation.term_pool_max_workers)}
+          onChange={(v) => update("translation.term_pool_max_workers", parseInt(v) || 0)}
+          type="number"
+        />
         <div style={{ fontSize: 12, color: "#666", marginTop: -8 }}>
           <b>Max output tokens</b> caps one response — the real limit on how much can be
           translated at once (4096 is the provider default; doubao-seed-2.1 allows 256k).

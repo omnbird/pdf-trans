@@ -311,6 +311,14 @@ async def translate_with_babeldoc(
         use_alternating_pages_dual=use_alternating,
         watermark_output_mode=WatermarkOutputMode.NoWatermark,
         custom_system_prompt=system_prompt,
+        # Glossary pre-pass is off unless explicitly requested: it costs one
+        # request per ~12 paragraphs before translation even starts.
+        auto_extract_glossary=bool(config.translation.auto_extract_glossary),
+        term_pool_max_workers=(
+            config.translation.term_pool_max_workers
+            if config.translation.term_pool_max_workers > 0
+            else pool_max_workers
+        ),
         # User terminology table becomes a native BabelDOC glossary, so it is
         # matched and enforced per segment instead of hoping the model obeys.
         glossaries=_build_glossaries(config.translation.glossary),

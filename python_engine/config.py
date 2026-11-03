@@ -58,6 +58,13 @@ class TranslationConfig(BaseModel):
     # User-supplied terminology, source -> target. Honoured by both pipelines
     # (prompt injection for the legacy path, native Glossary for BabelDOC).
     glossary: dict[str, str] = Field(default_factory=dict)
+    # BabelDOC's own glossary-building pre-pass: ~1 API call per 12 paragraphs
+    # BEFORE any translation (a 500-page book = 500+ requests and 15+ minutes).
+    # Our document_context + user glossary cover the same need, so this is off
+    # by default; enable it only if you have no glossary and want one derived.
+    auto_extract_glossary: bool = False
+    # Worker threads for that pre-pass (0 = same as the translation pool).
+    term_pool_max_workers: int = 0
     # Legacy/OCR pipelines translate a chunk of paragraphs per request so the
     # model sees neighbouring text (context) and prompt overhead is amortised.
     # 1 disables batching (one request per paragraph, the old behaviour).

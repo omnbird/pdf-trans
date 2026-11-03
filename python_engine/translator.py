@@ -1,15 +1,21 @@
 """Translation engine using OpenAI-compatible APIs (supports DeepSeek, etc.).
 
 Features:
+- Context-aware chunk translation: several paragraphs per request so the model
+  sees neighbouring text (and prompt overhead is amortised)
+- Document-level context + user glossary injected into every prompt
 - Async batch translation with rate limiting
 - Retry with exponential backoff
-- Glossary injection
-- Context-aware translation
+- Graceful fallback to per-segment translation when the model breaks the
+  JSON contract
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +32,26 @@ from python_engine.config import TranslationConfig
 from python_engine import diagnostics
 from python_engine.rate_limiter import RateLimit, TokenBucketRateLimiter
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_SYSTEM_PROMPT = "You are a professional translator."
+
+CHUNK_PROMPT = """Translate the following segments into Chinese.
+
+Rules:
+- `input` is the text to translate; `id` identifies the segment.
+- Return ONLY a JSON array of objects: [{{"id": 0, "output": "<translation>"}}]
+- Keep every id, keep the same order, never merge or split segments.
+- No explanations, no markdown fences, no notes.
+
+Context: {context}
+
+Glossary (use these translations exactly):
+{glossary}
+
+Segments:
+{segments}"""
+
 
 @dataclass
 class TranslationResult:
@@ -37,7 +63,7 @@ class TranslationResult:
 
 
 class Translator:
-    """Async translator with rate limiting and retry."""
+    """Async translator with rate limiting, batching and retry."""
 
     def __init__(self, config: TranslationConfig):
         self.config = config
@@ -68,6 +94,24 @@ class Translator:
             )
         self.rate_limiter = TokenBucketRateLimiter(rate_limit)
 
+    # ------------------------------------------------------------- prompts --
+
+    def _system_prompt(self) -> str:
+        """System message: document-level context when the user provided it."""
+        context = (self.config.document_context or "").strip()
+        if not context:
+            return DEFAULT_SYSTEM_PROMPT
+        return (
+            f"{DEFAULT_SYSTEM_PROMPT}\n\n"
+            f"About this document:\n{context}"
+        )
+
+    def _glossary_text(self, glossary: dict[str, str] | None) -> str:
+        merged = {**(self.config.glossary or {}), **(glossary or {})}
+        if not merged:
+            return "None"
+        return "\n".join(f"{source} = {target}" for source, target in merged.items())
+
     def _build_prompt(
         self,
         text: str,
@@ -75,17 +119,13 @@ class Translator:
         glossary: dict[str, str] | None = None,
     ) -> str:
         """Build the translation prompt with optional context and glossary."""
-        glossary_text = ""
-        if glossary:
-            glossary_text = "\n".join(
-                f"{en} = {zh}" for en, zh in glossary.items()
-            )
-
         return self.config.prompt_template.format(
             context=context or "None",
-            glossary=glossary_text or "None",
+            glossary=self._glossary_text(glossary),
             text=text,
         )
+
+    # ---------------------------------------------------------- translation --
 
     @retry(
         stop=stop_after_attempt(3),
@@ -113,7 +153,7 @@ class Translator:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a professional translator."},
+                    {"role": "system", "content": self._system_prompt()},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self.config.temperature,
@@ -121,7 +161,7 @@ class Translator:
                 extra_body=self.extra_body or None,
             )
 
-        translated = response.choices[0].message.content.strip()
+        translated = (response.choices[0].message.content or "").strip()
         tokens_used = response.usage.total_tokens if response.usage else 0
         diagnostics.tracker.record(
             model=self.model,
@@ -136,39 +176,190 @@ class Translator:
             tokens_used=tokens_used,
         )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type(
+            (
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.RateLimitError,
+                openai.InternalServerError,
+            )
+        ),
+        reraise=True,
+    )
+    async def _translate_chunk(
+        self,
+        segments: list[tuple[int, str]],
+        context: str = "",
+        glossary: dict[str, str] | None = None,
+    ) -> dict[int, str]:
+        """Translate several segments in one request (context-aware).
+
+        Returns a mapping id -> translation. Raises ValueError when the model
+        does not honour the JSON contract, so the caller can fall back.
+        """
+        payload = [{"id": idx, "input": text} for idx, text in segments]
+        prompt = CHUNK_PROMPT.format(
+            context=context or "None",
+            glossary=self._glossary_text(glossary),
+            segments=json.dumps(payload, ensure_ascii=False, indent=1),
+        )
+
+        async with self.rate_limiter:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self._system_prompt()},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                extra_body=self.extra_body or None,
+            )
+
+        diagnostics.tracker.record(
+            model=self.model,
+            extra_body=self.extra_body,
+            usage=response.usage,
+            stage="translate-batch",
+        )
+
+        raw = (response.choices[0].message.content or "").strip()
+        return self._parse_chunk_response(raw, segments)
+
+    @staticmethod
+    def _parse_chunk_response(raw: str, segments: list[tuple[int, str]]) -> dict[int, str]:
+        """Parse the model's JSON answer and validate it against the request."""
+        text = raw.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        # Tolerate a short preamble before the JSON payload
+        start = min(
+            [i for i in (text.find("["), text.find("{")) if i >= 0],
+            default=-1,
+        )
+        if start > 0:
+            text = text[start:]
+
+        data = json.loads(text)
+        if isinstance(data, dict):
+            for key in ("translations", "segments", "data", "output"):
+                if isinstance(data.get(key), list):
+                    data = data[key]
+                    break
+            else:
+                data = [data]
+
+        expected = {idx for idx, _ in segments}
+        result: dict[int, str] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                item_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            value = item.get("output", item.get("translation", item.get("text")))
+            if isinstance(value, str) and value.strip() and item_id in expected:
+                result[item_id] = value.strip()
+
+        if len(result) != len(expected):
+            missing = sorted(expected - set(result))
+            raise ValueError(f"chunk response missing ids: {missing}")
+        return result
+
+    def _chunk_segments(self, texts: list[str]) -> list[list[tuple[int, str]]]:
+        """Group segments so each request carries enough context."""
+        size = max(1, int(self.config.batch_size or 1))
+        char_limit = max(0, int(self.config.batch_char_limit or 0))
+
+        chunks: list[list[tuple[int, str]]] = []
+        current: list[tuple[int, str]] = []
+        current_chars = 0
+
+        for idx, text in enumerate(texts):
+            length = len(text)
+            too_many = len(current) >= size
+            too_long = char_limit and current and current_chars + length > char_limit
+            if current and (too_many or too_long):
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append((idx, text))
+            current_chars += length
+
+        if current:
+            chunks.append(current)
+        return chunks
+
     async def translate_batch(
         self,
         texts: list[str],
         context: str = "",
         glossary: dict[str, str] | None = None,
         on_progress: callable | None = None,
+        neighbors: bool = True,
     ) -> list[TranslationResult]:
-        """Translate multiple texts concurrently with rate limiting.
+        """Translate multiple texts with context-aware batching.
 
         Args:
             texts: List of text segments to translate
             context: Shared context (e.g., chapter title)
-            glossary: Terminology dictionary
+            glossary: Terminology dictionary (merged with config.glossary)
             on_progress: Callback(current, total) for progress updates
+            neighbors: Group segments into chunks so the model sees adjacent
+                text. Set False to keep one request per segment.
 
         Returns:
             List of TranslationResult in the same order as input
         """
         total = len(texts)
-        completed = 0
+        if total == 0:
+            return []
+
+        if not neighbors or max(1, int(self.config.batch_size or 1)) == 1:
+            chunks = [[(i, t)] for i, t in enumerate(texts)]
+        else:
+            chunks = self._chunk_segments(texts)
+
         results: list[TranslationResult | None] = [None] * total
+        completed = 0
+        lock = asyncio.Lock()
 
-        async def _translate_one(index: int, text: str) -> None:
+        async def _translate_one_chunk(chunk: list[tuple[int, str]]) -> None:
             nonlocal completed
-            result = await self._translate_single(text, context, glossary)
-            results[index] = result
-            completed += 1
-            if on_progress:
-                on_progress(completed, total)
+            translations: dict[int, str] = {}
+            if len(chunk) > 1:
+                try:
+                    translations = await self._translate_chunk(chunk, context, glossary)
+                except Exception as exc:  # noqa: BLE001 - fall back, never lose text
+                    logger.warning(
+                        "[Translator] chunk of %d segments failed (%s: %s); "
+                        "falling back to per-segment translation",
+                        len(chunk),
+                        type(exc).__name__,
+                        exc,
+                    )
+                    translations = {}
 
-        # Run all translations concurrently (rate limiter controls actual throughput)
-        await asyncio.gather(*[
-            _translate_one(i, text) for i, text in enumerate(texts)
-        ])
+            for idx, text in chunk:
+                if idx in translations:
+                    results[idx] = TranslationResult(
+                        original=text,
+                        translated=translations[idx],
+                        tokens_used=0,
+                    )
+                else:
+                    results[idx] = await self._translate_single(text, context, glossary)
+                async with lock:
+                    completed += 1
+                    if on_progress:
+                        on_progress(completed, total)
+
+        # Chunks run concurrently; the rate limiter controls actual throughput.
+        await asyncio.gather(*[_translate_one_chunk(chunk) for chunk in chunks])
 
         return [r for r in results if r is not None]

@@ -118,6 +118,62 @@ export default function SettingsPanel({ config, onChange }: Props) {
         </div>
       </Section>
 
+      {/* Document context & glossary */}
+      <Section title="Document Context & Glossary">
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+            Document Context (optional)
+          </label>
+          <textarea
+            value={config.translation.document_context}
+            onChange={(e) => update("translation.document_context", e.target.value)}
+            placeholder={
+              "Book title, author, field, audience, style rules.\n" +
+              "e.g. 《Kailas Histories》 by Toni Huber — Tibetan studies; keep Tibetan names in pinyin + IAST; use 转世/化身 for nirmāṇakāya…"
+            }
+            style={{
+              width: "100%",
+              minHeight: 110,
+              padding: 12,
+              background: "#0a0a0a",
+              color: "#e5e5e5",
+              border: "1px solid #333",
+              borderRadius: 8,
+              fontSize: 13,
+              lineHeight: 1.6,
+              resize: "vertical",
+              outline: "none",
+            }}
+          />
+          <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+            Sent as the system prompt for every request (and as BabelDOC's custom system prompt), so terminology and tone stay consistent across the whole book.
+          </div>
+        </div>
+
+        <GlossaryInput
+          value={config.translation.glossary}
+          onChange={(v) => update("translation.glossary", v)}
+        />
+
+        <div style={{ display: "flex", gap: 16 }}>
+          <Input
+            label="Paragraphs per request"
+            value={String(config.translation.batch_size)}
+            onChange={(v) => update("translation.batch_size", parseInt(v) || 1)}
+            type="number"
+          />
+          <Input
+            label="Max chars per request"
+            value={String(config.translation.batch_char_limit)}
+            onChange={(v) => update("translation.batch_char_limit", parseInt(v) || 0)}
+            type="number"
+          />
+        </div>
+        <div style={{ fontSize: 12, color: "#666", marginTop: -8 }}>
+          Legacy / OCR pipelines translate several paragraphs per request so the model sees neighbouring text. Set to 1 for the old one-request-per-paragraph behaviour. BabelDOC batches internally and ignores these two.
+        </div>
+      </Section>
+
       {/* Prompt Template */}
       <Section title="Prompt Template">
         <textarea
@@ -429,6 +485,80 @@ export default function SettingsPanel({ config, onChange }: Props) {
             {saveStatus}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function GlossaryInput({
+  value,
+  onChange,
+}: {
+  value: Record<string, string>;
+  onChange: (value: Record<string, string>) => void;
+}) {
+  const toText = (obj: Record<string, string>) =>
+    Object.entries(obj || {})
+      .map(([k, v]) => `${k} = ${v}`)
+      .join("\n");
+  const [text, setText] = useState(() => toText(value));
+  const [error, setError] = useState("");
+
+  const serialized = JSON.stringify(value || {});
+  useEffect(() => {
+    setText(toText(JSON.parse(serialized) as Record<string, string>));
+    setError("");
+  }, [serialized]);
+
+  const handleChange = (raw: string) => {
+    setText(raw);
+    const parsed: Record<string, string> = {};
+    const bad: string[] = [];
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx <= 0 || idx === trimmed.length - 1) {
+        bad.push(trimmed);
+        continue;
+      }
+      parsed[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+    }
+    if (bad.length) {
+      setError(`Ignored ${bad.length} line(s) without "source = target": ${bad[0]}`);
+    } else {
+      setError("");
+    }
+    onChange(parsed);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: "block", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+        Glossary (optional, one per line: `English = 中文`)
+      </label>
+      <textarea
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder={"nirmāṇakāya = 化身\nkailas = 冈仁波齐\nGreat Perfection = 大圆满"}
+        style={{
+          width: "100%",
+          minHeight: 110,
+          padding: 12,
+          background: "#0a0a0a",
+          color: "#e5e5e5",
+          border: "1px solid #333",
+          borderRadius: 8,
+          fontFamily: "monospace",
+          fontSize: 13,
+          lineHeight: 1.5,
+          resize: "vertical",
+          outline: "none",
+        }}
+      />
+      <div style={{ fontSize: 12, color: error ? "#ef4444" : "#666", marginTop: 4 }}>
+        {error ||
+          "Injected into every prompt; BabelDOC additionally enforces it as a native glossary."}
       </div>
     </div>
   );

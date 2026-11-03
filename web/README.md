@@ -33,6 +33,17 @@ web/start.sh 8123    # uses .venv/bin/python automatically, falls back to python
 
 Then open `http://<host>:8123/`.
 
+## Translation options worth knowing
+
+Settings → *Document Context & Glossary* / *Translation API*:
+
+| Setting | Effect |
+|---|---|
+| `document_context` | Book title/author/field/style rules. Sent as the system prompt of every request and as BabelDOC's `custom_system_prompt`, so terminology and tone stay consistent across the book. |
+| `glossary` | `English = 中文` lines. Injected into prompts for the paragraph pipelines and converted to a native BabelDOC `Glossary` (matched and enforced per segment). |
+| `batch_size` / `batch_char_limit` | Paragraph pipelines send several segments per request so the model sees neighbouring text; prompt overhead is amortised and requests drop (8 paragraphs → 2 requests at batch_size 4). `1` restores one-request-per-paragraph. If a model ignores the JSON contract, the affected chunk silently falls back to individual translation. |
+| `extra_body` | Provider-specific JSON merged into the request body — used to turn off thinking (see the preset buttons). |
+
 ## Notes
 
 - Uploads land in `~/pdf-trans-web/uploads`, outputs in

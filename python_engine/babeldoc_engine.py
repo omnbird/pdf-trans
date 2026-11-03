@@ -78,8 +78,9 @@ class CustomOpenAITranslator(OpenAITranslator):
         )
 
     def prompt(self, text):
-        """Override prompt to inject astrology/vedic domain context."""
-        domain_hint = (
+        """Override prompt to inject the document-level context."""
+        context = (self._engine_config.translation.document_context or "").strip()
+        domain_hint = context or (
             "You are a professional translator specializing in astrology and Vedic texts. "
             "Translate accurately and fluently into Chinese. Maintain original formatting."
         )
@@ -155,6 +156,25 @@ def _compute_pool_max_workers(config: EngineConfig, qps: int) -> int:
         # (PDFMathTranslate-next's formula min(1000, max(1, min(int(n*0.9), max(1, n-20))))
         # is designed for defaults of 40+ and yields 1 worker for n=5)
         return max(1, rate_limit.concurrent)
+
+
+def _build_glossaries(glossary: dict[str, str] | None):
+    """Convert the user's {source: target} table into BabelDOC glossaries."""
+    if not glossary:
+        return None
+    try:
+        from babeldoc.glossary import Glossary, GlossaryEntry
+    except ImportError:  # pragma: no cover - older BabelDOC without glossaries
+        return None
+
+    entries = [
+        GlossaryEntry(source=source, target=target)
+        for source, target in glossary.items()
+        if source and target
+    ]
+    if not entries:
+        return None
+    return [Glossary(name="user", entries=entries)]
 
 
 def _clean_system_prompt(prompt_template: str) -> str:
@@ -233,6 +253,9 @@ async def translate_with_babeldoc(
 
     # Build BabelDOC config
     system_prompt = _clean_system_prompt(config.translation.prompt_template)
+    document_context = (config.translation.document_context or "").strip()
+    if document_context:
+        system_prompt = f"{document_context}\n\n{system_prompt}"
 
     babeldoc_config = TranslationConfig(
         translator=translator,
@@ -250,6 +273,9 @@ async def translate_with_babeldoc(
         use_alternating_pages_dual=use_alternating,
         watermark_output_mode=WatermarkOutputMode.NoWatermark,
         custom_system_prompt=system_prompt,
+        # User terminology table becomes a native BabelDOC glossary, so it is
+        # matched and enforced per segment instead of hoping the model obeys.
+        glossaries=_build_glossaries(config.translation.glossary),
         min_text_length=3,
         only_include_translated_page=bool(config.pages),
     )

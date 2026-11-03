@@ -48,6 +48,19 @@ class TranslationConfig(BaseModel):
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE
     temperature: float = 0.3
     max_tokens: int = 4096
+    # Free-form description of the document: title, author, field, audience,
+    # style/terminology rules. Injected into the system prompt of every request
+    # (and reused as BabelDOC's custom_system_prompt), so the model translates
+    # with the book in mind instead of sentence-by-sentence in a vacuum.
+    document_context: str = ""
+    # User-supplied terminology, source -> target. Honoured by both pipelines
+    # (prompt injection for the legacy path, native Glossary for BabelDOC).
+    glossary: dict[str, str] = Field(default_factory=dict)
+    # Legacy/OCR pipelines translate a chunk of paragraphs per request so the
+    # model sees neighbouring text (context) and prompt overhead is amortised.
+    # 1 disables batching (one request per paragraph, the old behaviour).
+    batch_size: int = 6
+    batch_char_limit: int = 3000
     # Extra JSON fields merged into the chat.completions request body.
     # Providers disagree on how to disable reasoning/thinking, e.g.:
     #   Gemini (OpenAI-compat): {"google": {"thinking_config": {"thinking_budget": 0}}}

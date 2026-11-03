@@ -75,6 +75,11 @@ class TranslationEngine:
         event = {"type": "error", "message": error}
         print(json.dumps(event), flush=True)
 
+    def _context_hint(self, base: str = "") -> str:
+        """Combine a pipeline-specific hint with the user's document context."""
+        parts = [p.strip() for p in (base, self.config.translation.document_context) if p and p.strip()]
+        return "\n\n".join(parts)
+
     def _build_content_blocks(self, doc: PDFDocument) -> list[ContentBlock]:
         """Build content blocks from PDF document.
 
@@ -228,7 +233,7 @@ class TranslationEngine:
             try:
                 result = await self.translator._translate_single(
                     md,
-                    context=mistral_translation_prompt,
+                    context=self._context_hint(mistral_translation_prompt),
                 )
                 logger.debug("[Pipeline] Translated page %d/%d (page_num=%d, result_len=%d)", idx + 1, len(mistral_pages), page_num + 1, len(result.translated))
                 self._report_progress(
@@ -437,7 +442,7 @@ class TranslationEngine:
         async def _translate_one(page_num: int, md: str, idx: int) -> tuple[int, str]:
             result = await self.translator._translate_single(
                 md,
-                context=md_translation_prompt,
+                context=self._context_hint(md_translation_prompt),
             )
             self._report_progress(
                 "translating",
@@ -587,7 +592,7 @@ class TranslationEngine:
 
         results = await self.translator.translate_batch(
             texts=texts_to_translate,
-            context="Astrology and Vedic texts",
+            context=self._context_hint("Astrology and Vedic texts"),
             on_progress=progress_callback,
         )
 

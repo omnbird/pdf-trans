@@ -30,10 +30,58 @@ pub async fn get_pdf_info(file_path: String) -> Result<PdfInfo, String> {
 
     // Use Python to get page count
     let python = find_python();
-    let script = format!(
-        "import fitz; doc = fitz.open('{}'); print(len(doc)); doc.close()",
-        file_path.replace("'", "'\"'\"'")
-    );
+    // NOTE: raw string (no format!) so the Python braces need no escaping.
+    // Reports request parameters + token usage, mirroring the web server's
+    // /api/test-connection, so "is thinking actually off?" is visible in the UI.
+    let script = r#"import asyncio, json, sys
+from python_engine.config import EngineConfig
+from openai import AsyncOpenAI
+
+
+async def test():
+    cfg = EngineConfig.from_dict(json.loads(sys.argv[1]))
+    tr = cfg.translation
+
+    base = tr.base_url.rstrip("/")
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    extra_body = dict(tr.extra_body or {})
+
+    client = AsyncOpenAI(base_url=base, api_key=tr.api_key, timeout=60.0)
+    try:
+        resp = await client.chat.completions.create(
+            model=tr.model,
+            messages=[{"role": "user", "content": "Reply with the single word: ok"}],
+            max_tokens=32,
+            extra_body=extra_body or None,
+        )
+        usage = resp.usage
+        prompt_tokens = completion_tokens = reasoning_tokens = 0
+        if usage:
+            prompt_tokens = usage.prompt_tokens or 0
+            completion_tokens = usage.completion_tokens or 0
+            details = getattr(usage, "completion_tokens_details", None)
+            reasoning_tokens = getattr(details, "reasoning_tokens", 0) if details else 0
+
+        parts = ["Connection OK", f"in={prompt_tokens} out={completion_tokens}"]
+        if extra_body:
+            parts.append("extra_body=" + json.dumps(extra_body, ensure_ascii=False))
+        else:
+            parts.append("extra_body=none (nothing disables reasoning)")
+        if reasoning_tokens:
+            parts.append(f"reasoning={reasoning_tokens} -> thinking is ON (billed as output)")
+        else:
+            parts.append("reasoning=0")
+        print(json.dumps({"success": True, "message": " | ".join(parts)}))
+    except Exception as e:
+        msg = str(e)
+        if len(msg) > 500:
+            msg = msg[:500] + "..."
+        print(json.dumps({"success": False, "message": msg}))
+
+
+asyncio.run(test())
+"#;
 
     let output = Command::new(&python)
         .arg("-c")

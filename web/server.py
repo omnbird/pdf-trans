@@ -278,16 +278,23 @@ async def test_connection(request: web.Request) -> web.Response:
             extra_body=extra_body,
         )
         usage = response.usage
-        parts = ["Connection OK"]
+        prompt_tokens = completion_tokens = reasoning = 0
         if usage:
-            parts.append(
-                f"prompt={usage.prompt_tokens} completion={usage.completion_tokens}"
-            )
+            prompt_tokens = usage.prompt_tokens or 0
+            completion_tokens = usage.completion_tokens or 0
             details = getattr(usage, "completion_tokens_details", None)
             reasoning = getattr(details, "reasoning_tokens", 0) if details else 0
-            if reasoning:
-                parts.append(f"reasoning={reasoning} (thinking ON)")
-        parts.append(f"extra_body={json.dumps(extra_body) if extra_body else 'none'}")
+
+        # Same wording as the desktop (Tauri) command, so both show identical info.
+        parts = ["Connection OK", f"in={prompt_tokens} out={completion_tokens}"]
+        parts.append(
+            "extra_body=" + (json.dumps(extra_body, ensure_ascii=False)
+                             if extra_body else "none (nothing disables reasoning)")
+        )
+        parts.append(
+            f"reasoning={reasoning} -> thinking is ON (billed as output)"
+            if reasoning else "reasoning=0"
+        )
         return web.json_response({"success": True, "message": " | ".join(parts)})
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         return web.json_response({"success": False, "message": f"{type(exc).__name__}: {exc}"})

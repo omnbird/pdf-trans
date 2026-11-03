@@ -14,6 +14,13 @@ if [ ! -x "$PY" ]; then
   PY="$(command -v python3)"
 fi
 
+# Apply the optional BabelDOC typesetting fix (CJK paragraphs that are only
+# slightly too long get shrunk instead of using the free space below them).
+# Idempotent; skip with PDF_TRANS_NO_BABELDOC_PATCH=1.
+if [ "${PDF_TRANS_NO_BABELDOC_PATCH:-0}" != "1" ] && [ -x "$PY" ]; then
+  "$PY" scripts/patch_babeldoc_typesetting.py >/dev/null 2>&1 || true
+fi
+
 if [ ! -f dist/index.html ]; then
   echo "dist/ not found — building frontend…"
   npm run build

@@ -47,6 +47,26 @@ Settings → *Document Context & Glossary* / *Translation API*:
 | `max_tokens` | Output cap per request. Raise it (e.g. 8192) together with `batch_char_limit` if you want bigger chunks. |
 | `extra_body` | Provider-specific JSON merged into the request body — used to turn off thinking (see the preset buttons). |
 
+## CJK typesetting fix (optional)
+
+BabelDOC typesets the translation inside the original paragraph box. CJK needs
+more vertical space (line-skip 1.5 vs 1.3), so a paragraph that is only slightly
+too long is rendered at a smaller font — e.g. 9.35pt instead of 11pt — even when
+the page has free space below. Measured on a 551-page book: **521 of 3693
+paragraphs (14.1%)** were shrunk this way.
+
+`scripts/patch_babeldoc_typesetting.py` raises the threshold at which BabelDOC
+starts expanding the box (0.7 → 0.9), so those paragraphs keep their font size:
+
+```bash
+.venv/bin/python scripts/patch_babeldoc_typesetting.py            # apply
+.venv/bin/python scripts/patch_babeldoc_typesetting.py --revert   # undo
+```
+
+`web/start.sh` applies it automatically (set `PDF_TRANS_NO_BABELDOC_PATCH=1` to
+skip). It is a one-line edit of `babeldoc/.../typesetting.py` inside the venv, so
+re-installing/upgrading babeldoc requires re-running it.
+
 ## Notes
 
 - Uploads land in `~/pdf-trans-web/uploads`, outputs in

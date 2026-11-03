@@ -41,7 +41,10 @@ Settings → *Document Context & Glossary* / *Translation API*:
 |---|---|
 | `document_context` | Book title/author/field/style rules. Sent as the system prompt of every request and as BabelDOC's `custom_system_prompt`, so terminology and tone stay consistent across the book. |
 | `glossary` | `English = 中文` lines. Injected into prompts for the paragraph pipelines and converted to a native BabelDOC `Glossary` (matched and enforced per segment). |
-| `batch_size` / `batch_char_limit` | Paragraph pipelines send several segments per request so the model sees neighbouring text; prompt overhead is amortised and requests drop (8 paragraphs → 2 requests at batch_size 4). `1` restores one-request-per-paragraph. If a model ignores the JSON contract, the affected chunk silently falls back to individual translation. |
+| `batch_size` / `batch_char_limit` | Paragraph pipelines send several segments per request so the model sees neighbouring text; prompt overhead is amortised and requests drop. Bounded by `max_tokens` — the whole chunk's translation must fit in one response. `1` restores one-request-per-paragraph. |
+| `context_window_chars` | Tail of the previous chunk's source text, sent as read-only "preceding text" for continuity across chunks. |
+| `context_digest_chars` | Opening N characters of the document, injected into the system prompt of every request (book-level context; works for both pipelines). `0` disables. |
+| `max_tokens` | Output cap per request. Raise it (e.g. 8192) together with `batch_char_limit` if you want bigger chunks. |
 | `extra_body` | Provider-specific JSON merged into the request body — used to turn off thinking (see the preset buttons). |
 
 ## Notes

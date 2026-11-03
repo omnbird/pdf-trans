@@ -12,10 +12,13 @@ export interface AppConfig {
     model: string;
     prompt_template: string;
     temperature: number;
+    max_tokens: number;
     document_context: string;
     glossary: Record<string, string>;
     batch_size: number;
     batch_char_limit: number;
+    context_window_chars: number;
+    context_digest_chars: number;
     extra_body: Record<string, unknown>;
     rate_limit: {
       mode: "rpm" | "concurrent" | "custom";
@@ -66,10 +69,13 @@ Text to translate:
 
 Chinese translation:`,
     temperature: 0.3,
+    max_tokens: 4096,
     document_context: "",
     glossary: {},
-    batch_size: 6,
-    batch_char_limit: 3000,
+    batch_size: 12,
+    batch_char_limit: 6000,
+    context_window_chars: 800,
+    context_digest_chars: 1500,
     extra_body: {},
     rate_limit: {
       mode: "rpm",

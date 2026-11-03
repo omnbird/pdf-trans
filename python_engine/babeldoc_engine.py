@@ -27,12 +27,14 @@ class CustomOpenAITranslator(OpenAITranslator):
     """OpenAITranslator with domain-specific system prompt and concurrency tracking."""
 
     def __init__(self, config: EngineConfig, **kwargs):
-        super().__init__(**kwargs)
+        # Must be set BEFORE super().__init__(): BabelDOC calls self.prompt("") during
+        # its constructor (cache-impact params), and prompt() reads these fields.
         self._engine_config = config
+        self._extra_body = dict(config.translation.extra_body or {})
+        super().__init__(**kwargs)
         # Merge user-configured extra body fields (e.g. disable thinking)
         # into whatever BabelDOC set up. BabelDOC's do_translate() sends
         # self.extra_body with every chat.completions request.
-        self._extra_body = dict(config.translation.extra_body or {})
         if self._extra_body:
             self.extra_body.update(self._extra_body)
             self._install_extra_body_shim()
@@ -79,7 +81,10 @@ class CustomOpenAITranslator(OpenAITranslator):
 
     def prompt(self, text):
         """Override prompt to inject the document-level context."""
-        context = (self._engine_config.translation.document_context or "").strip()
+        config = getattr(self, "_engine_config", None)
+        context = ""
+        if config is not None:
+            context = (config.translation.document_context or "").strip()
         domain_hint = context or (
             "You are a professional translator specializing in astrology and Vedic texts. "
             "Translate accurately and fluently into Chinese. Maintain original formatting."
@@ -156,6 +161,30 @@ def _compute_pool_max_workers(config: EngineConfig, qps: int) -> int:
         # (PDFMathTranslate-next's formula min(1000, max(1, min(int(n*0.9), max(1, n-20))))
         # is designed for defaults of 40+ and yields 1 worker for n=5)
         return max(1, rate_limit.concurrent)
+
+
+def _pdf_digest(input_path: str | Path, limit: int) -> str:
+    """First `limit` characters of a PDF's text, used as book-level context."""
+    limit = max(0, int(limit or 0))
+    if limit == 0:
+        return ""
+    try:
+        import pymupdf
+
+        parts: list[str] = []
+        size = 0
+        with pymupdf.open(str(input_path)) as doc:
+            for page in doc:
+                text = page.get_text().strip()
+                if not text:
+                    continue
+                parts.append(text)
+                size += len(text)
+                if size >= limit:
+                    break
+        return "\n\n".join(parts)[:limit]
+    except Exception:  # pragma: no cover - digest is best-effort
+        return ""
 
 
 def _build_glossaries(glossary: dict[str, str] | None):
@@ -256,6 +285,15 @@ async def translate_with_babeldoc(
     document_context = (config.translation.document_context or "").strip()
     if document_context:
         system_prompt = f"{document_context}\n\n{system_prompt}"
+
+    # Book-level digest: opening text of the PDF, so every request knows what
+    # kind of book it is translating (BabelDOC has no per-request hook).
+    digest = _pdf_digest(input_path, config.translation.context_digest_chars)
+    if digest:
+        system_prompt += (
+            "\n\nOpening of the document (reference only, do not translate; "
+            f"use it to keep names and terminology consistent):\n{digest}"
+        )
 
     babeldoc_config = TranslationConfig(
         translator=translator,

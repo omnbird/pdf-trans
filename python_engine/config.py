@@ -59,8 +59,16 @@ class TranslationConfig(BaseModel):
     # Legacy/OCR pipelines translate a chunk of paragraphs per request so the
     # model sees neighbouring text (context) and prompt overhead is amortised.
     # 1 disables batching (one request per paragraph, the old behaviour).
-    batch_size: int = 6
-    batch_char_limit: int = 3000
+    # NOTE: batch size is bounded by max_tokens (one response must hold every
+    # translation in the chunk); oversized chunks are auto-split on truncation.
+    batch_size: int = 12
+    batch_char_limit: int = 6000
+    # Characters of the *previous* chunk's source text included in each request
+    # as "preceding text, do not translate" — gives continuity across chunks.
+    context_window_chars: int = 800
+    # First N characters of the document (title page / TOC / opening) included
+    # in the system prompt as a book-level digest. 0 disables it.
+    context_digest_chars: int = 1500
     # Extra JSON fields merged into the chat.completions request body.
     # Providers disagree on how to disable reasoning/thinking, e.g.:
     #   Gemini (OpenAI-compat): {"google": {"thinking_config": {"thinking_budget": 0}}}

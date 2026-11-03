@@ -80,6 +80,25 @@ class TranslationEngine:
         parts = [p.strip() for p in (base, self.config.translation.document_context) if p and p.strip()]
         return "\n\n".join(parts)
 
+    def _document_digest(self, texts: list[str]) -> str:
+        """Opening text of the document, used as book-level context.
+
+        Cheap approximation of "fit the whole book into the context": the model
+        gets the first pages in its system prompt for every request, while the
+        output stays bounded by max_tokens.
+        """
+        limit = max(0, int(self.config.translation.context_digest_chars or 0))
+        if limit == 0 or not texts:
+            return ""
+        parts: list[str] = []
+        size = 0
+        for text in texts:
+            parts.append(text)
+            size += len(text)
+            if size >= limit:
+                break
+        return "\n\n".join(parts)[:limit]
+
     def _build_content_blocks(self, doc: PDFDocument) -> list[ContentBlock]:
         """Build content blocks from PDF document.
 
@@ -208,6 +227,10 @@ class TranslationEngine:
                 on_progress=lambda msg: self._report_progress("processing", 10, 100, msg),
             )
             logger.info("[Pipeline] Mistral OCR returned %d pages", len(mistral_pages))
+            # Book-level context: opening of the OCR'ed text goes into every system prompt
+            self.translator._digest = self._document_digest(
+                [md for _, md in mistral_pages]
+            )
         except Exception as e:
             err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
             logger.error("[Pipeline] Mistral OCR failed: %s\n%s", err_msg, traceback.format_exc())
@@ -427,6 +450,9 @@ class TranslationEngine:
         ])
         ocr_results.sort(key=lambda x: x[0])
 
+        # Book-level context: opening of the OCR'ed text goes into every system prompt
+        self.translator._digest = self._document_digest([md for _, md in ocr_results])
+
         self._report_progress("processing", 40, 100, "OCR complete. Starting translation...")
 
         # Step 2: Translate each page's Markdown (concurrent via rate limiter)
@@ -594,6 +620,7 @@ class TranslationEngine:
             texts=texts_to_translate,
             context=self._context_hint("Astrology and Vedic texts"),
             on_progress=progress_callback,
+            digest=self._document_digest(texts_to_translate),
         )
 
         # Step 5: Fill translated text back into blocks

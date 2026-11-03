@@ -46,7 +46,7 @@ Rules:
 
 Context: {context}
 
-Glossary (use these translations exactly):
+{preceding}Glossary (use these translations exactly):
 {glossary}
 
 Segments:
@@ -78,6 +78,8 @@ class Translator:
         self.model = config.model
         # Provider-specific extra fields (e.g. disable thinking/reasoning)
         self.extra_body = dict(config.extra_body or {})
+        # Book-level digest (opening text), used when the caller sets it.
+        self._digest = ""
 
         # Setup rate limiter — each mode uses only its own parameter
         if config.rate_limit.mode == "rpm":
@@ -96,15 +98,19 @@ class Translator:
 
     # ------------------------------------------------------------- prompts --
 
-    def _system_prompt(self) -> str:
-        """System message: document-level context when the user provided it."""
+    def _system_prompt(self, digest: str = "") -> str:
+        """System message: document-level context and/or a book digest."""
         context = (self.config.document_context or "").strip()
-        if not context:
-            return DEFAULT_SYSTEM_PROMPT
-        return (
-            f"{DEFAULT_SYSTEM_PROMPT}\n\n"
-            f"About this document:\n{context}"
-        )
+        parts = [DEFAULT_SYSTEM_PROMPT]
+        if context:
+            parts.append(f"About this document:\n{context}")
+        digest = (digest or self._digest or "").strip()
+        if digest:
+            parts.append(
+                "Opening of the document (reference only, do not translate; "
+                f"use it to keep names and terminology consistent):\n{digest}"
+            )
+        return "\n\n".join(parts)
 
     def _glossary_text(self, glossary: dict[str, str] | None) -> str:
         merged = {**(self.config.glossary or {}), **(glossary or {})}
@@ -194,15 +200,24 @@ class Translator:
         segments: list[tuple[int, str]],
         context: str = "",
         glossary: dict[str, str] | None = None,
+        preceding: str = "",
     ) -> dict[int, str]:
         """Translate several segments in one request (context-aware).
 
         Returns a mapping id -> translation. Raises ValueError when the model
-        does not honour the JSON contract, so the caller can fall back.
+        does not honour the JSON contract or the answer was truncated, so the
+        caller can split the chunk and retry.
         """
         payload = [{"id": idx, "input": text} for idx, text in segments]
+        preceding_block = ""
+        if preceding.strip():
+            preceding_block = (
+                "Preceding text (context only — do NOT translate or output it):\n"
+                f"{preceding.strip()}\n\n"
+            )
         prompt = CHUNK_PROMPT.format(
             context=context or "None",
+            preceding=preceding_block,
             glossary=self._glossary_text(glossary),
             segments=json.dumps(payload, ensure_ascii=False, indent=1),
         )
@@ -227,6 +242,8 @@ class Translator:
         )
 
         raw = (response.choices[0].message.content or "").strip()
+        if response.choices[0].finish_reason == "length":
+            raise ValueError(f"response truncated at max_tokens={self.config.max_tokens}")
         return self._parse_chunk_response(raw, segments)
 
     @staticmethod
@@ -302,6 +319,7 @@ class Translator:
         glossary: dict[str, str] | None = None,
         on_progress: callable | None = None,
         neighbors: bool = True,
+        digest: str = "",
     ) -> list[TranslationResult]:
         """Translate multiple texts with context-aware batching.
 
@@ -312,6 +330,8 @@ class Translator:
             on_progress: Callback(current, total) for progress updates
             neighbors: Group segments into chunks so the model sees adjacent
                 text. Set False to keep one request per segment.
+            digest: Opening text of the document (book-level context) added to
+                the system prompt of every request.
 
         Returns:
             List of TranslationResult in the same order as input
@@ -320,30 +340,54 @@ class Translator:
         if total == 0:
             return []
 
+        if digest:
+            self._digest = digest
+
         if not neighbors or max(1, int(self.config.batch_size or 1)) == 1:
             chunks = [[(i, t)] for i, t in enumerate(texts)]
         else:
             chunks = self._chunk_segments(texts)
 
+        # Preceding-context window per chunk: the tail of the previous chunk's
+        # source text. Computed from the source (not from translations) so
+        # chunks can still run concurrently.
+        window = max(0, int(self.config.context_window_chars or 0))
+        preceding: list[str] = [""] * len(chunks)
+        if window:
+            for i in range(1, len(chunks)):
+                previous_text = "\n".join(t for _, t in chunks[i - 1])
+                preceding[i] = previous_text[-window:] if len(previous_text) > window else previous_text
+
         results: list[TranslationResult | None] = [None] * total
         completed = 0
         lock = asyncio.Lock()
 
-        async def _translate_one_chunk(chunk: list[tuple[int, str]]) -> None:
+        async def _translate_chunk_tree(
+            chunk: list[tuple[int, str]], pre: str, depth: int = 0
+        ) -> None:
+            """Translate a chunk, splitting it in half when the model errs."""
             nonlocal completed
             translations: dict[int, str] = {}
             if len(chunk) > 1:
                 try:
-                    translations = await self._translate_chunk(chunk, context, glossary)
-                except Exception as exc:  # noqa: BLE001 - fall back, never lose text
+                    translations = await self._translate_chunk(
+                        chunk, context, glossary, preceding=pre
+                    )
+                except Exception as exc:  # noqa: BLE001 - split, never lose text
+                    half = len(chunk) // 2
+                    first_half = chunk[:half]
+                    tail = "\n".join(t for _, t in first_half)
+                    if window and len(tail) > window:
+                        tail = tail[-window:]
                     logger.warning(
                         "[Translator] chunk of %d segments failed (%s: %s); "
-                        "falling back to per-segment translation",
-                        len(chunk),
-                        type(exc).__name__,
-                        exc,
+                        "splitting into %d + %d (depth %d)",
+                        len(chunk), type(exc).__name__, exc,
+                        half, len(chunk) - half, depth,
                     )
-                    translations = {}
+                    await _translate_chunk_tree(first_half, pre, depth + 1)
+                    await _translate_chunk_tree(chunk[half:], tail if window else "", depth + 1)
+                    return
 
             for idx, text in chunk:
                 if idx in translations:
@@ -360,6 +404,8 @@ class Translator:
                         on_progress(completed, total)
 
         # Chunks run concurrently; the rate limiter controls actual throughput.
-        await asyncio.gather(*[_translate_one_chunk(chunk) for chunk in chunks])
+        await asyncio.gather(*[
+            _translate_chunk_tree(chunk, preceding[i]) for i, chunk in enumerate(chunks)
+        ])
 
         return [r for r in results if r is not None]

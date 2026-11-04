@@ -116,6 +116,31 @@ async def upload(request: web.Request) -> web.Response:
     )
 
 
+async def detect_pdf(request: web.Request) -> web.Response:
+    """Report whether a PDF looks scanned, without translating anything."""
+    data = await request.json()
+    path = Path(data.get("filePath", ""))
+    if not path.is_file():
+        raise web.HTTPNotFound(text="file not found")
+    return web.json_response(await asyncio.to_thread(_scan_verdict, str(path)))
+
+
+def _scan_verdict(path: str) -> dict:
+    from python_engine.scanned_detect import detect_scanned_pdf
+
+    report = detect_scanned_pdf(path)
+    return {
+        "is_scanned": report.is_scanned,
+        "confidence": report.confidence,
+        "summary": report.summary(),
+        "reason": report.reason,
+        "image_pages": report.image_pages,
+        "text_pages": report.text_pages,
+        "sampled": len(report.sampled),
+        "total_pages": report.total_pages,
+    }
+
+
 async def pdf_info(request: web.Request) -> web.Response:
     data = await request.json()
     path = Path(data.get("filePath", ""))
@@ -142,6 +167,8 @@ async def translate(request: web.Request) -> web.StreamResponse:
     if page_ranges:
         config["pages"] = page_ranges
 
+    scanned_mode = (data.get("scannedMode") or "auto").lower()
+
     response = web.StreamResponse(
         headers={
             "Content-Type": "application/x-ndjson",
@@ -162,6 +189,8 @@ async def translate(request: web.Request) -> web.StreamResponse:
             "--output-dir",
             str(out_dir),
         ]
+        if scanned_mode in ("scanned", "digital"):
+            cmd += ["--scanned-mode", scanned_mode]
         await _write(response, {"type": "log", "message": f"$ {' '.join(cmd[:3])} …"})
 
         proc = await asyncio.create_subprocess_exec(
@@ -315,6 +344,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/config", save_config)
     app.router.add_post("/api/upload", upload)
     app.router.add_post("/api/pdfinfo", pdf_info)
+    app.router.add_post("/api/detect", detect_pdf)
     app.router.add_post("/api/translate", translate)
     app.router.add_post("/api/cancel", cancel)
     app.router.add_post("/api/test-connection", test_connection)

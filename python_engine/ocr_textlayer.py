@@ -25,6 +25,12 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# Font size of the invisible layer = median line height × this factor.
+# Measured on a synthetic scan (10 pt original): 0.78 and 0.88 both give a
+# uniform result, 0.88 lands closest to the original size, while 1.0 makes
+# BabelDOC shrink individual paragraphs again (visible size jumps).
+FONT_SIZE_FACTOR = 0.88
+
 # Pages are rendered and OCR'ed in chunks to bound memory on long books.
 BATCH_SIZE = 6
 
@@ -184,6 +190,14 @@ def build_text_layer_pdf(
                 page = doc[idx]
                 skip_boxes = _diagram_boxes(layout_model, image) if layout_model else []
                 skipped = 0
+                # One font size per page: line boxes vary with ascenders and
+                # descenders, and feeding that jitter to BabelDOC makes it
+                # render paragraphs at visibly different sizes.
+                heights = sorted(
+                    b.height for b in (blocks or [])
+                    if getattr(b, "height", 0) > 0 and (getattr(b, "text", "") or "").strip()
+                )
+                page_font = max(3.0, heights[len(heights) // 2] * scale * FONT_SIZE_FACTOR) if heights else None
                 for block in blocks or []:
                     text = (getattr(block, "text", "") or "").strip()
                     if not text:
@@ -203,7 +217,7 @@ def build_text_layer_pdf(
                             skipped += 1
                             continue
 
-                    font_size = max(3.0, height * 0.78)
+                    font_size = page_font if page_font else max(3.0, height * 0.78)
                     baseline = y1 - height * 0.18
                     try:
                         page.insert_text(

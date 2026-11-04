@@ -667,6 +667,60 @@ class TranslationEngine:
 
         return output_files
 
+    def _check_typeset_quality(self, pdf_path: str) -> None:
+        """Log how the rendered page looks: overflow and font-size spread.
+
+        BabelDOC shrinks a paragraph rather than letting it leave its box, so
+        "text off the page" should never happen; what can happen is a paragraph
+        shrinking a lot. Both are logged so a bad result is visible in the run
+        log instead of only on screen.
+        """
+        try:
+            import pymupdf
+
+            sizes: list[float] = []
+            near_edge = 0
+            with pymupdf.open(pdf_path) as doc:
+                for page in doc:
+                    limit = page.rect.height - 8
+                    for block in page.get_text("dict").get("blocks", []):
+                        if block.get("type") != 0:
+                            continue
+                        text = "".join(
+                            span.get("text", "")
+                            for line in block.get("lines", [])
+                            for span in line.get("spans", [])
+                        ).strip()
+                        if not text:
+                            continue
+                        if block["bbox"][3] > limit:
+                            near_edge += 1
+                        for line in block.get("lines", []):
+                            for span in line.get("spans", []):
+                                if span.get("text", "").strip():
+                                    sizes.append(round(float(span["size"]), 2))
+
+            if not sizes:
+                return
+            low, high = min(sizes), max(sizes)
+            logger.info(
+                "[typeset] font sizes %.2f–%.2f pt over %d spans%s",
+                low,
+                high,
+                len(sizes),
+                f"; {near_edge} block(s) within 8pt of the page edge" if near_edge else "",
+            )
+            if high > 0 and low / high < 0.75:
+                logger.warning(
+                    "[typeset] smallest text is %.0f%% of the largest on the same document "
+                    "(%.2f vs %.2f pt) — some paragraphs were shrunk to fit",
+                    100 * low / high,
+                    low,
+                    high,
+                )
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            logger.debug("[typeset] quality check skipped: %s", exc)
+
     async def _run_ocr_babeldoc_pipeline(self, input_path: Path) -> dict[str, str]:
         """Scanned PDF, layout preserved.
 
@@ -769,6 +823,9 @@ class TranslationEngine:
             if not ocr_outputs:
                 self._report_error("No output files were generated")
                 return {}
+
+            if ocr_outputs.get("pdf"):
+                self._check_typeset_quality(ocr_outputs["pdf"])
 
             # Without these two lines the UI never learns where the file is.
             self._report_progress("generating", 100, 100, "Done!")

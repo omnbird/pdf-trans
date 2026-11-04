@@ -145,6 +145,10 @@ class ScannedConfig(BaseModel):
     # oneDNN acceleration for PaddleOCR. Off by default: it crashes Paddle 3.x
     # on some CPUs ("ConvertPirAttribute2RuntimeAttribute not support").
     enable_mkldnn: bool = False
+    # Leave text inside figures/tables untranslated: chart and diagram labels
+    # (horoscope grids, tables of glyphs) turn into noise when translated, and
+    # the page image already shows them.
+    skip_figures_tables: bool = True
     mistral_api_key: str = ""  # API key for Mistral OCR mode
 
 

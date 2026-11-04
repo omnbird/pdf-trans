@@ -70,6 +70,19 @@ clicking again returns to automatic. The choice travels with the job
 (`scannedMode` = `auto` | `scanned` | `digital`) so the engine skips detection
 when it is pinned. Nothing is translated before you press Start.
 
+**Charts and tables stay untranslated.** Text inside figure/table regions is not
+written into the text layer at all, so BabelDOC never sees it and the page image
+keeps its original labels — machine-translating horoscope grids or diagram
+legends produces noise. Regions come from two signals, unioned and grown by a
+0.4% margin:
+
+* BabelDOC's layout model (YOLO, labels `figure` / `table`);
+* ruled-line detection (OpenCV morphology): rectangles enclosed by long
+  horizontal + vertical rules, which is what hand-drawn charts are.
+
+Toggle: `scanned.skip_figures_tables` (on by default). Verified on a synthetic
+horoscope grid: 9 chart labels left untouched, surrounding body text translated.
+
 **Translation** (`scanned.mode = "ocr_babeldoc"`, the default): OCR → invisible
 text layer → BabelDOC.
 

@@ -28,6 +28,84 @@ logger = logging.getLogger(__name__)
 # Pages are rendered and OCR'ed in chunks to bound memory on long books.
 BATCH_SIZE = 6
 
+# DocLayout labels whose text is *not* worth translating: charts, diagrams,
+# scans of tables. Text inside these regions is left as-is on the page image.
+DEFAULT_SKIP_LABELS = ("figure", "table")
+
+
+def _diagram_boxes(layout_model, image: Image.Image) -> list[tuple[float, float, float, float]]:
+    """Figure/table regions of a page image, in pixel coordinates."""
+    import numpy as np
+
+    try:
+        result = layout_model.predict(np.array(image))[0]
+    except Exception as exc:  # pragma: no cover - layout model is best-effort
+        logger.warning("[textlayer] layout prediction failed: %s", exc)
+        return []
+
+    names = getattr(result, "names", {}) or {}
+    boxes = []
+    for box in getattr(result, "boxes", []):
+        label = names.get(int(box.cls), "")
+        if label in DEFAULT_SKIP_LABELS:
+            x0, y0, x1, y1 = (float(v) for v in box.xyxy)
+            boxes.append((x0, y0, x1, y1))
+
+    # Hand-drawn charts are frequently under-detected by the layout model;
+    # add regions enclosed by ruling lines.
+    boxes.extend(_grid_boxes(image))
+
+    # Small margin so labels sitting on the frame are included too.
+    if boxes:
+        w, h = image.size
+        mx, my = w * 0.004, h * 0.004
+        boxes = [(max(0.0, x0 - mx), max(0.0, y0 - my), x1 + mx, y1 + my)
+                 for x0, y0, x1, y1 in boxes]
+    return boxes
+
+
+def _grid_boxes(image: Image.Image) -> list[tuple[float, float, float, float]]:
+    """Regions enclosed by ruling lines (tables, chart frames), via morphology.
+
+    YOLO alone often boxes only part of a hand-drawn chart, so this adds a
+    geometric signal: long horizontal + vertical rules whose intersection forms
+    a rectangle. Page borders (>80% of the page) are ignored.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception:  # pragma: no cover - optional
+        return []
+
+    gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+    # Dark pixels = ink; invert so lines become white.
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+
+    h, w = binary.shape
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(20, w // 20), 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(20, h // 20)))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel, iterations=1)
+    vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel, iterations=1)
+    grid = cv2.add(horizontal, vertical)
+    grid = cv2.dilate(grid, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=2)
+
+    contours, _ = cv2.findContours(grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    page_area = float(w * h)
+    boxes = []
+    for c in contours:
+        x, y, bw, bh = cv2.boundingRect(c)
+        area = float(bw * bh)
+        if area < page_area * 0.02 or area > page_area * 0.8:
+            continue
+        if bw < w * 0.15 or bh < h * 0.05:
+            continue
+        boxes.append((float(x), float(y), float(x + bw), float(y + bh)))
+    return boxes
+
+
+def _inside(x: float, y: float, boxes: Sequence[tuple[float, float, float, float]]) -> bool:
+    return any(x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in boxes)
+
 
 def _has_cjk(text: str) -> bool:
     return any("\u3400" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" for ch in text)
@@ -45,6 +123,7 @@ def build_text_layer_pdf(
     dpi: int = 200,
     page_indices: Sequence[int] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    skip_diagrams: bool = True,
 ) -> Path:
     """Write OCR text back onto `src` as invisible text and save to `dst`.
 
@@ -56,12 +135,25 @@ def build_text_layer_pdf(
         dpi: rendering resolution for OCR — higher is more accurate but slower
         page_indices: pages to OCR (0-based); None = all pages
         on_progress: callback(done, total) for progress reporting
+        skip_diagrams: leave text inside figures/tables untranslated (charts and
+            diagram labels read as gibberish when machine-translated, and the
+            page image already contains them)
 
     Returns:
         The path written (`dst`).
     """
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
+
+    layout_model = None
+    if skip_diagrams:
+        try:
+            from babeldoc.docvision.doclayout import DocLayoutModel
+
+            layout_model = DocLayoutModel.load_available()
+            logger.info("[textlayer] skipping figure/table regions during OCR")
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning("[textlayer] layout model unavailable, translating everything: %s", exc)
 
     doc = pymupdf.open(str(src))
     try:
@@ -88,8 +180,10 @@ def build_text_layer_pdf(
             except AttributeError:  # engine without batch API
                 blocks_per_page = [ocr_engine.predict(img) for img in images]
 
-            for idx, blocks in zip(batch, blocks_per_page):
+            for idx, blocks, image in zip(batch, blocks_per_page, images):
                 page = doc[idx]
+                skip_boxes = _diagram_boxes(layout_model, image) if layout_model else []
+                skipped = 0
                 for block in blocks or []:
                     text = (getattr(block, "text", "") or "").strip()
                     if not text:
@@ -99,6 +193,15 @@ def build_text_layer_pdf(
                     height = block.height * scale
                     if height <= 0 or x0 < 0 or y1 < 0:
                         continue
+
+                    if skip_boxes:
+                        # OCR blocks and layout boxes share the rendered-image
+                        # pixel space; compare there (not in PDF points).
+                        cx = block.x + block.width / 2
+                        cy = block.y + block.height / 2
+                        if _inside(cx, cy, skip_boxes):
+                            skipped += 1
+                            continue
 
                     font_size = max(3.0, height * 0.78)
                     baseline = y1 - height * 0.18
@@ -116,13 +219,20 @@ def build_text_layer_pdf(
                             idx + 1, text[:40], exc,
                         )
 
+                if skipped:
+                    logger.info(
+                        "[textlayer] page %d: left %d line(s) inside figures/tables untranslated",
+                        idx + 1, skipped,
+                    )
+
                 done += 1
                 if on_progress:
                     on_progress(done, total)
 
         doc.save(str(dst), garbage=3, deflate=True)
+        page_total = doc.page_count
     finally:
         doc.close()
 
-    logger.info("[textlayer] wrote %s (%d pages)", dst, len(page_indices or range(doc.page_count)))
+    logger.info("[textlayer] wrote %s (%d pages, %d OCR'ed)", dst, page_total, total)
     return dst

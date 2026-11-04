@@ -706,6 +706,7 @@ class TranslationEngine:
             self.config.scanned.dpi,
             page_indices,
             _ocr_progress,
+            skip_diagrams=self.config.scanned.skip_figures_tables,
         )
 
         self._report_progress(

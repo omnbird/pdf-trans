@@ -461,6 +461,21 @@ export default function SettingsPanel({ config, onChange }: Props) {
               </>
             )}
 
+            {config.scanned.mode === "ocr_babeldoc" && (
+              <>
+                <CheckBox
+                  label="Leave charts & tables untranslated (recommended)"
+                  checked={config.scanned.skip_figures_tables}
+                  onChange={(checked) => update("scanned.skip_figures_tables", checked)}
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4, marginBottom: 12 }}>
+                  Text inside figure/table regions detected by the layout model stays as it is
+                  on the page image — horoscope grids, diagrams and scanned tables read as
+                  gibberish when machine-translated.
+                </div>
+              </>
+            )}
+
             <Input
               label="DPI"
               value={String(config.scanned.dpi)}

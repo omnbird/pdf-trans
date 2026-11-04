@@ -411,14 +411,24 @@ export default function SettingsPanel({ config, onChange }: Props) {
       {/* Scanned PDF Options */}
       <Section title="Scanned PDF">
         <CheckBox
-          label="Treat input PDF as scanned (use OCR pipeline)"
-          checked={config.scanned.is_scanned}
-          onChange={(checked) => update("scanned.is_scanned", checked)}
+          label="Auto-detect scanned PDFs (recommended)"
+          checked={config.scanned.auto_detect}
+          onChange={(checked) => update("scanned.auto_detect", checked)}
         />
         <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-          The app no longer auto-detects. Toggle this on for scanned / image-based PDFs;
-          leave it off for normal text-based PDFs.
+          Samples pages across the whole document and checks extracted characters, image
+          coverage and text readability, then logs why it decided "scanned" or "digital".
         </div>
+
+        {!config.scanned.auto_detect && (
+          <div style={{ marginTop: 12 }}>
+            <CheckBox
+              label="Treat input PDF as scanned (manual override)"
+              checked={config.scanned.is_scanned}
+              onChange={(checked) => update("scanned.is_scanned", checked)}
+            />
+          </div>
+        )}
 
         {config.scanned.is_scanned && (
           <>
@@ -428,7 +438,8 @@ export default function SettingsPanel({ config, onChange }: Props) {
               value={config.scanned.mode}
               onChange={(v) => update("scanned.mode", v)}
               options={[
-                { value: "ocr", label: "PaddleOCR (local, free)" },
+                { value: "ocr_babeldoc", label: "OCR + keep original layout (BabelDOC) — scanned books" },
+                { value: "ocr", label: "PaddleOCR (local, text only, rebuilt PDF)" },
                 { value: "vision", label: "Vision API (cloud, structured Markdown output)" },
                 { value: "mistral_ocr", label: "Mistral OCR (cloud, dedicated OCR API)" },
               ]}
@@ -439,6 +450,16 @@ export default function SettingsPanel({ config, onChange }: Props) {
               onChange={(v) => update("scanned.dpi", parseInt(v) || 300)}
               type="number"
             />
+
+            {config.scanned.mode === "ocr_babeldoc" && (
+              <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+                OCRs each page, writes an <b>invisible text layer</b> at the recognised
+                positions, then lets BabelDOC translate in place: the scanned page image,
+                tables and page geometry stay exactly as in the original, with the Chinese
+                text overlaid. Needs <code>pip install paddlepaddle paddleocr</code>.
+                Slower than the text-only pipeline (one OCR pass + one BabelDOC pass).
+              </div>
+            )}
 
             {config.scanned.mode === "vision" && (
               <div style={{ marginTop: 16, padding: 16, background: "#0a0a0a", borderRadius: 8, border: "1px solid #333" }}>

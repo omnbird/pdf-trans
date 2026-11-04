@@ -45,8 +45,9 @@ export interface AppConfig {
     extra_body: Record<string, unknown>;
   };
   scanned: {
+    auto_detect: boolean;
     is_scanned: boolean;
-    mode: "ocr" | "vision" | "mistral_ocr";
+    mode: "ocr" | "ocr_babeldoc" | "vision" | "mistral_ocr";
     dpi: number;
     mistral_api_key: string;
   };
@@ -104,6 +105,7 @@ Chinese translation:`,
     extra_body: {},
   },
   scanned: {
+    auto_detect: true,
     is_scanned: false,
     mode: "ocr",
     dpi: 150,

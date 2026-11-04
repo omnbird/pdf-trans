@@ -237,6 +237,9 @@ async def translate_with_babeldoc(
     input_path: str | Path,
     config: EngineConfig,
     progress_callback: Callable[[str, int, int, str], None] | None = None,
+    ocr_workaround: bool = False,
+    skip_scanned_detection: bool = False,
+    output_base_name: str | None = None,
 ) -> dict[str, str]:
     """Translate a digital PDF using BabelDOC for layout preservation.
 
@@ -251,7 +254,7 @@ async def translate_with_babeldoc(
     input_path = Path(input_path)
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    base_name = input_path.stem
+    base_name = output_base_name or input_path.stem
 
     # Configure rate limiting
     qps = _compute_qps(config)
@@ -314,6 +317,10 @@ async def translate_with_babeldoc(
         # Glossary pre-pass is off unless explicitly requested: it costs one
         # request per ~12 paragraphs before translation even starts.
         auto_extract_glossary=bool(config.translation.auto_extract_glossary),
+        # Scanned input with an OCR text layer: BabelDOC's OCR mode ignores
+        # render order and forces black text, which is what such pages need.
+        ocr_workaround=ocr_workaround,
+        skip_scanned_detection=skip_scanned_detection,
         term_pool_max_workers=(
             config.translation.term_pool_max_workers
             if config.translation.term_pool_max_workers > 0

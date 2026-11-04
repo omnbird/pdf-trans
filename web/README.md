@@ -47,6 +47,39 @@ Settings → *Document Context & Glossary* / *Translation API*:
 | `max_tokens` | Output cap per request. Raise it (e.g. 8192) together with `batch_char_limit` if you want bigger chunks. |
 | `extra_body` | Provider-specific JSON merged into the request body — used to turn off thinking (see the preset buttons). |
 
+## Scanned PDFs
+
+**Detection** (`python_engine/scanned_detect.py`) is automatic by default
+(`scanned.auto_detect`). It samples up to 24 pages spread across the document and
+combines four signals per page — extractable characters, image coverage, vector
+drawings, text readability — instead of the old "text-block area of the first
+three pages" heuristic (which misread pages with a thin hidden OCR layer, and
+pages whose text sits inside a large image). The verdict and the evidence are
+logged:
+
+```
+[Engine] scanned PDF (2/2 sampled pages are image-only); sampled pages [1,2] -> II
+[Engine] digital PDF (22/24 sampled pages carry real text); sampled pages [1,25,...] -> ITTTT...
+```
+
+**Translation** (`scanned.mode = "ocr_babeldoc"`, the default): OCR → invisible
+text layer → BabelDOC.
+
+1. PaddleOCR reads each page (line boxes + text).
+2. Those lines are written back onto the page as **invisible** text
+   (`render_mode=3`) at their exact positions, so the PDF now has a text layer
+   while looking untouched.
+3. BabelDOC translates it in place with `ocr_workaround=True`: the original text
+   is erased and the translation drawn at the same spots, while images, figures
+   and page geometry stay as they were.
+
+Verified on synthetic scans (text + figure page): translated text replaces the
+original, the figure survives untouched, mono and dual outputs both render
+correctly. Requires `pip install paddlepaddle paddleocr`.
+
+The older `ocr` mode is still available: it rebuilds a fresh PDF from OCR text
+and does *not* keep the original layout.
+
 ## CJK typesetting (optional tweaks)
 
 BabelDOC typesets each translation inside the original paragraph box and shrinks

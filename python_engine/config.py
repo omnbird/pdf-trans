@@ -128,8 +128,14 @@ class ScannedConfig(BaseModel):
     Vision API, or Mistral OCR) to extract text.
     """
 
-    is_scanned: bool = False  # user explicitly marks the input PDF as scanned
-    mode: Literal["ocr", "vision", "mistral_ocr"] = "ocr"
+    # Detect image-only PDFs automatically (sampled across the document and
+    # logged with evidence). When True this overrides `is_scanned`; set
+    # auto_detect=False to force the manual switch below.
+    auto_detect: bool = True
+    is_scanned: bool = False  # manual switch, only used when auto_detect=False
+    # ocr_babeldoc: OCR the page, write an invisible text layer, then let
+    # BabelDOC translate it in place (layout-preserving output for scans).
+    mode: Literal["ocr", "ocr_babeldoc", "vision", "mistral_ocr"] = "ocr_babeldoc"
     dpi: int = 150
     ocr_language: str = "en"
     mistral_api_key: str = ""  # API key for Mistral OCR mode

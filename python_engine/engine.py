@@ -6,10 +6,12 @@ Works with both digital and scanned PDFs.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from typing import Callable
@@ -19,6 +21,7 @@ from python_engine.pdf_generator import ContentBlock, PageImage, ParagraphData, 
 from python_engine.md_generator import generate_markdown
 from python_engine.ocr_engine import PaddleOCREngine
 from python_engine.pdf_processor import PDFDocument, is_diagram_or_table_page, is_readable_text, merge_blocks_to_paragraphs, parse_page_ranges, process_pdf
+from python_engine.scanned_detect import detect_scanned_pdf
 from python_engine.translator import Translator
 
 logger = logging.getLogger(__name__)
@@ -30,17 +33,32 @@ class TranslationEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         self.translator = Translator(config.translation)
-        # Only load the OCR model when the user has explicitly marked the PDF
-        # as scanned AND chose the local OCR backend. Loading it for digital
-        # PDFs is wasted work.
-        self.ocr_engine = (
-            PaddleOCREngine(
-                language=config.scanned.ocr_language,
-                on_loading=lambda msg: self._report_progress("processing", 5, 100, msg),
-            )
-            if config.scanned.is_scanned and config.scanned.mode == "ocr"
-            else None
-        )
+        # OCR is initialised lazily: scanned-ness may only be known after
+        # auto-detection (and loading PaddleOCR for a digital PDF is waste).
+        self._ocr_engine: PaddleOCREngine | None = None
+        self._ocr_engine_disabled = False
+        if config.scanned.is_scanned and config.scanned.mode in ("ocr", "ocr_babeldoc"):
+            self.ocr_engine  # trigger eager init when the user forced scanned
+
+    @property
+    def ocr_engine(self) -> PaddleOCREngine | None:
+        """PaddleOCR instance, created on first use."""
+        if self._ocr_engine is None and not self._ocr_engine_disabled:
+            try:
+                self._ocr_engine = PaddleOCREngine(
+                    language=self.config.scanned.ocr_language,
+                    on_loading=lambda msg: self._report_progress("processing", 5, 100, msg),
+                )
+                self._ocr_engine._get_ocr()  # load now so failures surface here
+            except Exception as exc:  # pragma: no cover - depends on install
+                self._ocr_engine_disabled = True
+                logger.error("[Engine] PaddleOCR unavailable: %s", exc)
+                self._report_error(
+                    "PaddleOCR is not installed. Install it with: "
+                    "pip install paddlepaddle paddleocr"
+                )
+                return None
+        return self._ocr_engine
 
     def _report_progress(self, stage: str, current: int, total: int, message: str = "") -> None:
         """Report progress as JSON to stdout (for Tauri integration)."""
@@ -647,6 +665,67 @@ class TranslationEngine:
 
         return output_files
 
+    async def _run_ocr_babeldoc_pipeline(self, input_path: Path) -> dict[str, str]:
+        """Scanned PDF, layout preserved.
+
+        OCR every page, write the recognised lines back as an invisible text
+        layer, then let BabelDOC translate that layer in place. The page images
+        (and therefore the original layout) are never touched.
+        """
+        from python_engine.babeldoc_engine import translate_with_babeldoc
+        from python_engine.ocr_textlayer import build_text_layer_pdf
+
+        ocr = self.ocr_engine
+        if ocr is None:
+            self._report_error("OCR engine unavailable (install paddleocr)")
+            return {}
+
+        import pymupdf
+
+        with pymupdf.open(str(input_path)) as doc:
+            total_pages = doc.page_count
+        page_indices = parse_page_ranges(self.config.pages, total_pages)
+
+        work_dir = Path(tempfile.gettempdir()) / "pdf-trans"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        layered = work_dir / f"{input_path.stem}.ocr.pdf"
+
+        self._report_progress("processing", 5, 100, f"OCR {len(page_indices)} pages...")
+
+        def _ocr_progress(done: int, total: int) -> None:
+            pct = 5 + int(40 * done / max(total, 1))
+            self._report_progress("processing", pct, 100, f"OCR {done}/{total} pages")
+
+        await asyncio.to_thread(
+            build_text_layer_pdf,
+            input_path,
+            layered,
+            ocr,
+            self.config.scanned.dpi,
+            page_indices,
+            _ocr_progress,
+        )
+
+        self._report_progress(
+            "translating", 50, 100,
+            "Text layer ready — translating with original layout preserved...",
+        )
+        try:
+            outputs = await translate_with_babeldoc(
+                layered,
+                self.config,
+                progress_callback=self._report_progress,
+                ocr_workaround=True,
+                skip_scanned_detection=True,
+                output_base_name=input_path.stem,
+            )
+        finally:
+            try:
+                layered.unlink()
+            except OSError:
+                pass
+        return outputs
+
     async def translate_document(
         self,
         input_path: str | Path,
@@ -662,6 +741,21 @@ class TranslationEngine:
             Dictionary of output format -> file path
         """
         input_path = Path(input_path)
+
+        # Digital vs scanned: auto-detection samples the whole document and logs
+        # the evidence. When enabled it overrides the manual switch.
+        if self.config.scanned.auto_detect:
+            try:
+                report = detect_scanned_pdf(input_path)
+                logger.info("[Engine] %s", report.summary())
+                self._report_progress("processing", 2, 100, report.summary())
+                self.config.scanned.is_scanned = report.is_scanned
+            except Exception as exc:  # never let detection break a translation
+                logger.warning("[Engine] scanned detection failed: %s", exc)
+
+        # Scanned PDF + layout preservation: OCR -> invisible text layer -> BabelDOC
+        if self.config.scanned.is_scanned and self.config.scanned.mode == "ocr_babeldoc":
+            return await self._run_ocr_babeldoc_pipeline(input_path)
 
         # Mistral OCR pipeline — only used when the user marks the PDF as scanned
         if self.config.scanned.is_scanned and self.config.scanned.mode == "mistral_ocr":

@@ -758,7 +758,23 @@ class TranslationEngine:
 
         # Scanned PDF + layout preservation: OCR -> invisible text layer -> BabelDOC
         if self.config.scanned.is_scanned and self.config.scanned.mode == "ocr_babeldoc":
-            return await self._run_ocr_babeldoc_pipeline(input_path)
+            try:
+                ocr_outputs = await self._run_ocr_babeldoc_pipeline(input_path)
+            except Exception as e:  # noqa: BLE001 - surfaced to the UI
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.error("[Engine] OCR pipeline crashed: %s\n%s", err_msg, traceback.format_exc())
+                self._report_error(f"OCR pipeline crashed: {err_msg}")
+                return {}
+
+            if not ocr_outputs:
+                self._report_error("No output files were generated")
+                return {}
+
+            # Without these two lines the UI never learns where the file is.
+            self._report_progress("generating", 100, 100, "Done!")
+            self._report_finish(ocr_outputs)
+            logger.info("[Engine] OCR pipeline finished: %s", ocr_outputs)
+            return ocr_outputs
 
         # Mistral OCR pipeline — only used when the user marks the PDF as scanned
         if self.config.scanned.is_scanned and self.config.scanned.mode == "mistral_ocr":

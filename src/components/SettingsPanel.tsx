@@ -430,11 +430,11 @@ export default function SettingsPanel({ config, onChange }: Props) {
           </div>
         )}
 
-        {config.scanned.is_scanned && (
+        {(config.scanned.auto_detect || config.scanned.is_scanned) && (
           <>
             <div style={{ height: 1, background: "#222", margin: "16px 0" }} />
             <Select
-              label="Processing Mode"
+              label="Processing Mode (used whenever a PDF is treated as scanned)"
               value={config.scanned.mode}
               onChange={(v) => update("scanned.mode", v)}
               options={[

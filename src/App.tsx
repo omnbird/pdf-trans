@@ -47,6 +47,7 @@ export interface AppConfig {
   scanned: {
     auto_detect: boolean;
     is_scanned: boolean;
+    ocr_model_size: "mobile" | "server";
     mode: "ocr" | "ocr_babeldoc" | "vision" | "mistral_ocr";
     dpi: number;
     mistral_api_key: string;
@@ -107,6 +108,7 @@ Chinese translation:`,
   scanned: {
     auto_detect: true,
     is_scanned: false,
+    ocr_model_size: "mobile",
     mode: "ocr",
     dpi: 150,
     mistral_api_key: "",

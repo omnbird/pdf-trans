@@ -49,6 +49,7 @@ class TranslationEngine:
                     language=self.config.scanned.ocr_language,
                     on_loading=lambda msg: self._report_progress("processing", 5, 100, msg),
                     enable_mkldnn=self.config.scanned.enable_mkldnn,
+                    model_size=self.config.scanned.ocr_model_size,
                 )
                 self._ocr_engine._get_ocr()  # load now so failures surface here
             except Exception as exc:  # pragma: no cover - depends on install

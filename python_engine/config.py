@@ -138,6 +138,10 @@ class ScannedConfig(BaseModel):
     mode: Literal["ocr", "ocr_babeldoc", "vision", "mistral_ocr"] = "ocr_babeldoc"
     dpi: int = 150
     ocr_language: str = "en"
+    # PaddleOCR model tier: "mobile" (fast, ~20 MB) or "server" (slower, more
+    # accurate on dense/small print). Both are PP-OCRv5; models are downloaded
+    # on first use into ~/.paddlex/official_models.
+    ocr_model_size: Literal["mobile", "server"] = "mobile"
     # oneDNN acceleration for PaddleOCR. Off by default: it crashes Paddle 3.x
     # on some CPUs ("ConvertPirAttribute2RuntimeAttribute not support").
     enable_mkldnn: bool = False

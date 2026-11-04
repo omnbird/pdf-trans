@@ -26,6 +26,7 @@ class PaddleOCREngine:
         language: str = "en",
         on_loading: Callable[[str], None] | None = None,
         enable_mkldnn: bool = False,
+        model_size: str = "mobile",
     ):
         self.language = language
         self._ocr = None
@@ -34,6 +35,7 @@ class PaddleOCREngine:
         # ("ConvertPirAttribute2RuntimeAttribute not support"), so it is off by
         # default; turn it on for speed if your machine handles it.
         self.enable_mkldnn = enable_mkldnn
+        self.model_size = "server" if str(model_size).lower() == "server" else "mobile"
 
     def _get_ocr(self):
         """Lazy init to avoid slow import when not needed."""
@@ -46,8 +48,8 @@ class PaddleOCREngine:
             logger.info("Initializing PaddleOCR with lightweight models...")
             self._ocr = PaddleOCR(
                 # Use mobile models instead of server models for much faster load
-                text_detection_model_name="PP-OCRv5_mobile_det",
-                text_recognition_model_name="PP-OCRv5_mobile_rec",
+                text_detection_model_name=f"PP-OCRv5_{self.model_size}_det",
+                text_recognition_model_name=f"PP-OCRv5_{self.model_size}_rec",
                 # Disable features we don't need for clean scanned book pages
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,

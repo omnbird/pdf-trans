@@ -444,6 +444,23 @@ export default function SettingsPanel({ config, onChange }: Props) {
                 { value: "mistral_ocr", label: "Mistral OCR (cloud, dedicated OCR API)" },
               ]}
             />
+            {(config.scanned.mode === "ocr" || config.scanned.mode === "ocr_babeldoc") && (
+              <>
+                <Select
+                  label="OCR model"
+                  value={config.scanned.ocr_model_size}
+                  onChange={(v) => update("scanned.ocr_model_size", v)}
+                  options={[
+                    { value: "mobile", label: "PP-OCRv5 mobile — fast (recommended)" },
+                    { value: "server", label: "PP-OCRv5 server — slower, better on dense/small print" },
+                  ]}
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: -8, marginBottom: 12 }}>
+                  Both are downloaded automatically on first use (~20 MB mobile, ~150 MB server).
+                </div>
+              </>
+            )}
+
             <Input
               label="DPI"
               value={String(config.scanned.dpi)}

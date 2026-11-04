@@ -21,10 +21,19 @@ logger = logging.getLogger(__name__)
 class PaddleOCREngine:
     """Lazy-initialized PaddleOCR wrapper with lightweight models."""
 
-    def __init__(self, language: str = "en", on_loading: Callable[[str], None] | None = None):
+    def __init__(
+        self,
+        language: str = "en",
+        on_loading: Callable[[str], None] | None = None,
+        enable_mkldnn: bool = False,
+    ):
         self.language = language
         self._ocr = None
         self._on_loading = on_loading
+        # oneDNN (mkldnn) crashes Paddle 3.x on some CPUs
+        # ("ConvertPirAttribute2RuntimeAttribute not support"), so it is off by
+        # default; turn it on for speed if your machine handles it.
+        self.enable_mkldnn = enable_mkldnn
 
     def _get_ocr(self):
         """Lazy init to avoid slow import when not needed."""
@@ -43,6 +52,7 @@ class PaddleOCREngine:
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
+                enable_mkldnn=self.enable_mkldnn,
             )
             logger.info("PaddleOCR ready")
 

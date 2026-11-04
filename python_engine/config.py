@@ -138,6 +138,9 @@ class ScannedConfig(BaseModel):
     mode: Literal["ocr", "ocr_babeldoc", "vision", "mistral_ocr"] = "ocr_babeldoc"
     dpi: int = 150
     ocr_language: str = "en"
+    # oneDNN acceleration for PaddleOCR. Off by default: it crashes Paddle 3.x
+    # on some CPUs ("ConvertPirAttribute2RuntimeAttribute not support").
+    enable_mkldnn: bool = False
     mistral_api_key: str = ""  # API key for Mistral OCR mode
 
 

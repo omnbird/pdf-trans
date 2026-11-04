@@ -48,6 +48,7 @@ class TranslationEngine:
                 self._ocr_engine = PaddleOCREngine(
                     language=self.config.scanned.ocr_language,
                     on_loading=lambda msg: self._report_progress("processing", 5, 100, msg),
+                    enable_mkldnn=self.config.scanned.enable_mkldnn,
                 )
                 self._ocr_engine._get_ocr()  # load now so failures surface here
             except Exception as exc:  # pragma: no cover - depends on install

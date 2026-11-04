@@ -83,7 +83,22 @@ text layer → BabelDOC.
 
 Verified on synthetic scans (text + figure page): translated text replaces the
 original, the figure survives untouched, mono and dual outputs both render
-correctly. Requires `pip install paddlepaddle paddleocr`.
+correctly.
+
+Install (≈1–1.5 GB):
+
+```bash
+.venv/bin/pip install paddlepaddle paddleocr "paddlex[ocr]"
+```
+
+Two platform quirks, both handled:
+
+* **headless Linux**: `paddleocr` pulls `opencv-contrib-python`, which links
+  `libGL`; a user-local copy is used when the distro package is missing
+  (`web/start.sh` adds it to `LD_LIBRARY_PATH`).
+* **oneDNN**: Paddle 3.x crashes on some CPUs with
+  `ConvertPirAttribute2RuntimeAttribute not support`; MKLDNN is therefore off by
+  default (`scanned.enable_mkldnn`).
 
 The older `ocr` mode is still available: it rebuilds a fresh PDF from OCR text
 and does *not* keep the original layout.

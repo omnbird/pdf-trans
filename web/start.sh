@@ -6,6 +6,12 @@ cd "$(dirname "$0")/.."
 
 PORT="${1:-${PORT:-8123}}"
 
+# PaddleOCR pulls opencv-contrib, which links libGL even on a headless box.
+# A user-local copy of libGL is used when the distro package is missing.
+if [ -d "$HOME/.local/libgl/usr/lib/x86_64-linux-gnu" ]; then
+  export LD_LIBRARY_PATH="$HOME/.local/libgl/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 # Prefer the project venv (it has babeldoc, so layout-preserving PDF output
 # works). Fall back to the system interpreter with a warning.
 PY=".venv/bin/python"

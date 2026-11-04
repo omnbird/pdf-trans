@@ -25,6 +25,10 @@ interface Props {
   onPageRangesChange: (ranges: string) => void;
   scannedModes: Record<string, ScannedMode>;
   onScannedModeChange: (path: string, mode: ScannedMode) => void;
+  /** Global auto-detect setting (Settings → Scanned PDF). */
+  autoDetect: boolean;
+  /** Manual switch, only meaningful when autoDetect is off. */
+  manualScanned: boolean;
 }
 
 export default function FileUpload({
@@ -34,6 +38,8 @@ export default function FileUpload({
   onPageRangesChange,
   scannedModes,
   onScannedModeChange,
+  autoDetect,
+  manualScanned,
 }: Props) {
   const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
   const [verdicts, setVerdicts] = useState<Record<string, ScanVerdict | null>>({});
@@ -72,6 +78,7 @@ export default function FileUpload({
   // correct the engine *before* starting the translation.
   useEffect(() => {
     let cancelled = false;
+    if (!autoDetect) return;
     for (const path of files) {
       if (verdicts[path] !== undefined) continue;
       setVerdicts((prev) => ({ ...prev, [path]: null }));
@@ -92,7 +99,8 @@ export default function FileUpload({
     const override = scannedModes[path] ?? "auto";
     if (override === "scanned") return true;
     if (override === "digital") return false;
-    return verdict?.is_scanned ?? false;
+    // Matches what the engine will actually do: auto-detection or the manual switch.
+    return autoDetect ? (verdict?.is_scanned ?? false) : manualScanned;
   };
 
   const cycleMode = (path: string, verdict: ScanVerdict | null) => {
@@ -215,7 +223,7 @@ export default function FileUpload({
                   const verdict = verdicts[info.path];
                   const override = scannedModes[info.path] ?? "auto";
                   const isScanned = effectiveMode(info.path, verdict);
-                  if (verdict === undefined || verdict === null) {
+                  if (autoDetect && (verdict === undefined || verdict === null)) {
                     return (
                       <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
                         detecting type…
@@ -226,8 +234,10 @@ export default function FileUpload({
                     <button
                       onClick={() => cycleMode(info.path, verdict)}
                       title={
-                        `${verdict.summary}\n\nClick to override ` +
-                        `(${override === "auto" ? "currently automatic" : "currently forced"})`
+                        (verdict
+                          ? `${verdict.summary}\n\n`
+                          : "Manual mode (Settings → Scanned PDF)\n\n") +
+                        `Click to override (${override === "auto" ? "currently automatic" : "currently forced"})`
                       }
                       style={{
                         marginTop: 6,
@@ -248,11 +258,18 @@ export default function FileUpload({
                 })()}
                 {(() => {
                   const verdict = verdicts[info.path];
-                  if (!verdict) return null;
+                  if (autoDetect) {
+                    if (!verdict) return null;
+                    return (
+                      <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
+                        {verdict.reason} — {verdict.image_pages} image / {verdict.text_pages} text
+                        {" "}of {verdict.sampled} sampled pages
+                      </div>
+                    );
+                  }
                   return (
                     <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
-                      {verdict.reason} — {verdict.image_pages} image / {verdict.text_pages} text
-                      {" "}of {verdict.sampled} sampled pages
+                      Manual mode — set in Settings → Scanned PDF
                     </div>
                   );
                 })()}

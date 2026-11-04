@@ -235,6 +235,8 @@ function App() {
               onScannedModeChange={(path, mode) =>
                 setScannedModes((prev) => ({ ...prev, [path]: mode }))
               }
+              autoDetect={config.scanned.auto_detect}
+              manualScanned={config.scanned.is_scanned}
             />
 
             {files.length > 0 && (

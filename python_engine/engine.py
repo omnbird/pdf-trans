@@ -710,6 +710,16 @@ class TranslationEngine:
                 len(sizes),
                 f"; {near_edge} block(s) within 8pt of the page edge" if near_edge else "",
             )
+            # Chinese glyphs are far denser than Latin ones: 8 pt is already
+            # uncomfortable in print, while Latin footnotes at 7 pt are fine.
+            if low < 9.0:
+                logger.warning(
+                    "[typeset] smallest text is %.2f pt — below the ~9 pt readability "
+                    "floor for Chinese; consider a larger OCR model / wider margins, "
+                    "or accept fewer translated lines per paragraph",
+                    low,
+                )
+
             if high > 0 and low / high < 0.75:
                 logger.warning(
                     "[typeset] smallest text is %.0f%% of the largest on the same document "

@@ -819,7 +819,33 @@ class TranslationEngine:
                 err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
                 msg = f"BabelDOC failed: {err_msg}"
                 self._report_progress("translating", 25, 100, msg)
-                # Continue to fallback pipeline
+                # BabelDOC refuses image-only documents. That is a *detection*
+                # signal, not a dead end: retry through the OCR pipeline.
+                lowered = err_msg.lower()
+                looks_scanned = (
+                    type(e).__name__ == "ScannedPDFError"
+                    or "scanned pdf detected" in lowered
+                    or "no paragraphs" in lowered
+                )
+                if looks_scanned:
+                    self._report_progress(
+                        "processing", 30, 100,
+                        "BabelDOC reports a scanned document — switching to the OCR pipeline",
+                    )
+                    self.config.scanned.is_scanned = True
+                    try:
+                        ocr_outputs = await self._run_ocr_babeldoc_pipeline(input_path)
+                    except Exception as ocr_exc:  # noqa: BLE001 - surfaced below
+                        self._report_error(
+                            f"Scanned document, and OCR failed: {ocr_exc}. "
+                            "Install PaddleOCR (pip install paddlepaddle paddleocr paddlex[ocr]) "
+                            "or switch Settings > Scanned PDF > Processing Mode."
+                        )
+                        return {}
+                    if ocr_outputs:
+                        self._report_finish(ocr_outputs)
+                        return ocr_outputs
+                # otherwise continue to the fallback pipeline
 
         # Determine pipeline: vision OCR for scanned PDFs when mode is "vision"
         if doc.pdf_type == "scanned" and self.config.scanned.mode == "vision":

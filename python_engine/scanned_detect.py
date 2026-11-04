@@ -88,14 +88,22 @@ def _image_coverage(page: pymupdf.Page) -> float:
     if page_area <= 0:
         return 0.0
     covered = 0.0
+    bboxes: list[tuple[float, float, float, float]] = []
     try:
-        infos = page.get_image_info()
+        for info in page.get_image_info():
+            if info.get("bbox"):
+                bboxes.append(tuple(info["bbox"]))
     except Exception:  # pragma: no cover - malformed page
-        return 0.0
-    for info in infos:
-        bbox = info.get("bbox")
-        if not bbox:
-            continue
+        pass
+    # Fallback: some producers only expose images as dict blocks.
+    if not bboxes:
+        try:
+            for block in page.get_text("dict").get("blocks", []):
+                if block.get("type") == 1 and block.get("bbox"):
+                    bboxes.append(tuple(block["bbox"]))
+        except Exception:  # pragma: no cover
+            pass
+    for bbox in bboxes:
         x0, y0, x1, y1 = bbox
         w = max(0.0, min(x1, page.rect.x1) - max(x0, page.rect.x0))
         h = max(0.0, min(y1, page.rect.y1) - max(y0, page.rect.y0))
@@ -106,7 +114,10 @@ def _image_coverage(page: pymupdf.Page) -> float:
 def _classify(signal: PageSignal) -> PageKind:
     if signal.chars >= MIN_TEXT_CHARS and signal.readable:
         return "text"
-    if signal.chars <= MAX_IMAGE_CHARS and signal.image_ratio >= MIN_IMAGE_RATIO:
+    # A page with (almost) no extractable text has to go through OCR, whatever
+    # it looks like: scans with tiny/low-contrast images and pages whose text
+    # was converted to vector outlines both end up here.
+    if signal.chars <= MAX_IMAGE_CHARS:
         return "image"
     # Text present but unreadable (broken CMap / garbage OCR layer) with images.
     if signal.chars > 0 and not signal.readable and signal.image_ratio >= MIN_IMAGE_RATIO:
@@ -152,6 +163,10 @@ def detect_scanned_pdf(path: str | Path, sample_limit: int = 24) -> ScanReport:
     text_pages = sum(1 for s in signals if s.kind == "text")
     sampled = len(signals)
     image_ratio = image_pages / sampled
+
+    if text_pages == 0:
+        return ScanReport(True, 1.0, total, signals,
+                          f"no sampled page carries extractable text ({image_pages}/{sampled} are image-only)")
 
     if image_ratio >= SCANNED_PAGE_RATIO:
         return ScanReport(True, image_ratio, total, signals,

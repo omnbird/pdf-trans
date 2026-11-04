@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import FileUpload from "./components/FileUpload";
 import SettingsPanel from "./components/SettingsPanel";
 import ProgressBar from "./components/ProgressBar";
-import { translatePdf, loadConfig, cancelTranslation } from "./hooks/useTranslation";
+import { translatePdf, loadConfig, cancelTranslation, ScannedMode } from "./hooks/useTranslation";
 import { baseName, fileUrl } from "./lib/bridge";
 
 export interface AppConfig {
@@ -119,6 +119,7 @@ function App() {
   const [files, setFiles] = useState<string[]>([]);
   const [pageRanges, setPageRanges] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
+  const [scannedModes, setScannedModes] = useState<Record<string, ScannedMode>>({});
   const [progress, setProgress] = useState({ stage: "", current: 0, total: 100, message: "" });
   const [results, setResults] = useState<{ pdf?: string; markdown?: string }[]>([]);
 
@@ -158,9 +159,13 @@ function App() {
 
     for (const file of files) {
       try {
-        const result = await translatePdf(file, config, pageRanges, (p) => {
-          setProgress(p);
-        });
+        const result = await translatePdf(
+          file,
+          config,
+          pageRanges,
+          (p) => setProgress(p),
+          scannedModes[file] ?? "auto"
+        );
         setResults((prev) => [...prev, result]);
       } catch (err) {
         console.error(err);
@@ -226,6 +231,10 @@ function App() {
               pageRanges={pageRanges}
               onChange={setFiles}
               onPageRangesChange={setPageRanges}
+              scannedModes={scannedModes}
+              onScannedModeChange={(path, mode) =>
+                setScannedModes((prev) => ({ ...prev, [path]: mode }))
+              }
             />
 
             {files.length > 0 && (

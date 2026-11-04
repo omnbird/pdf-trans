@@ -51,6 +51,22 @@ export function pickPdfFiles(): Promise<File[]> {
   });
 }
 
+export interface ScanVerdict {
+  is_scanned: boolean;
+  confidence: number;
+  summary: string;
+  reason: string;
+  image_pages: number;
+  text_pages: number;
+  sampled: number;
+  total_pages: number;
+}
+
+/** Ask the backend whether a PDF looks scanned (no translation involved). */
+export async function detectOnServer(path: string): Promise<ScanVerdict> {
+  return postJson<ScanVerdict>("/api/detect", { filePath: path });
+}
+
 export async function getPdfInfo(
   path: string
 ): Promise<{ size: number; pages: number }> {

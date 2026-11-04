@@ -58,6 +58,65 @@ pub struct ProgressEvent {
     pub message: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ScanVerdict {
+    pub is_scanned: bool,
+    pub confidence: f64,
+    pub summary: String,
+    pub reason: String,
+    pub image_pages: usize,
+    pub text_pages: usize,
+    pub sampled: usize,
+    pub total_pages: usize,
+}
+
+/// Ask the engine whether a PDF looks like a scan, without translating it.
+/// Used by the UI to show the verdict (and let the user override it) before
+/// starting a translation.
+#[tauri::command]
+pub async fn detect_pdf(file_path: String) -> Result<ScanVerdict, String> {
+    let python = find_python();
+    let project_root = resolve_project_path("python_engine/main.py")
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    remember_project_dir(&project_root);
+
+    let script = r#"import json, sys
+from python_engine.scanned_detect import detect_scanned_pdf
+
+r = detect_scanned_pdf(sys.argv[1])
+print(json.dumps({
+    "is_scanned": r.is_scanned,
+    "confidence": r.confidence,
+    "summary": r.summary(),
+    "reason": r.reason,
+    "image_pages": r.image_pages,
+    "text_pages": r.text_pages,
+    "sampled": len(r.sampled),
+    "total_pages": r.total_pages,
+}))
+"#;
+
+    let output = Command::new(&python)
+        .arg("-c")
+        .arg(script)
+        .arg(&file_path)
+        .current_dir(&project_root)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run detection: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Ok(verdict) = serde_json::from_str::<ScanVerdict>(line.trim()) {
+            return Ok(verdict);
+        }
+    }
+    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
 #[derive(serde::Serialize)]
 pub struct TranslationResult {
     pub pdf: Option<String>,
@@ -71,6 +130,7 @@ pub async fn translate_pdf(
     file_path: String,
     config_json: String,
     page_ranges: String,
+    scanned_mode: Option<String>,
 ) -> Result<TranslationResult, String> {
     // Find Python executable (use venv if available)
     let python = find_python();
@@ -109,6 +169,13 @@ pub async fn translate_pdf(
 
     if !page_ranges.is_empty() {
         cmd.arg("--pages").arg(&page_ranges);
+    }
+
+    // "auto" (or none) lets the engine decide; "scanned"/"digital" pins it.
+    if let Some(mode) = scanned_mode.as_deref() {
+        if mode == "scanned" || mode == "digital" {
+            cmd.arg("--scanned-mode").arg(mode);
+        }
     }
 
     cmd.stdout(Stdio::piped())

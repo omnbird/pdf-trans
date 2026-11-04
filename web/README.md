@@ -62,6 +62,14 @@ logged:
 [Engine] digital PDF (22/24 sampled pages carry real text); sampled pages [1,25,...] -> ITTTT...
 ```
 
+**Confirmation in the UI**: as soon as a PDF is added, the file card shows the
+verdict as a pill — `Digital` (blue) or `Scanned` (amber) — with the evidence
+underneath (`3 image / 21 text of 24 sampled pages`) and the full summary as a
+tooltip. Clicking the pill forces the opposite classification ("forced"), and
+clicking again returns to automatic. The choice travels with the job
+(`scannedMode` = `auto` | `scanned` | `digital`) so the engine skips detection
+when it is pinned. Nothing is translated before you press Start.
+
 **Translation** (`scanned.mode = "ocr_babeldoc"`, the default): OCR → invisible
 text layer → BabelDOC.
 

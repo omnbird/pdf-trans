@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Channel } from "@tauri-apps/api/core";
 import { AppConfig } from "../App";
-import { isWebMode } from "../lib/bridge";
+import { detectOnServer, isWebMode, ScanVerdict } from "../lib/bridge";
 
 export interface ProgressEvent {
   stage: string;
@@ -20,7 +20,8 @@ async function translateOnServer(
   filePath: string,
   config: AppConfig,
   pageRanges: string,
-  onProgress: (progress: ProgressEvent) => void
+  onProgress: (progress: ProgressEvent) => void,
+  scannedMode: ScannedMode = "auto"
 ): Promise<TranslateResult> {
   const resp = await fetch("/api/translate", {
     method: "POST",
@@ -29,6 +30,7 @@ async function translateOnServer(
       filePath,
       configJson: JSON.stringify(config),
       pageRanges,
+      scannedMode,
     }),
   });
   if (!resp.ok || !resp.body) {
@@ -88,14 +90,23 @@ async function translateOnServer(
   return result;
 }
 
+/** auto = engine decides, scanned/digital = user override for this file. */
+export type ScannedMode = "auto" | "scanned" | "digital";
+
+export function detectPdf(filePath: string): Promise<ScanVerdict> {
+  if (isWebMode()) return detectOnServer(filePath);
+  return invoke<ScanVerdict>("detect_pdf", { filePath });
+}
+
 export async function translatePdf(
   filePath: string,
   config: AppConfig,
   pageRanges: string,
-  onProgress: (progress: ProgressEvent) => void
+  onProgress: (progress: ProgressEvent) => void,
+  scannedMode: ScannedMode = "auto"
 ): Promise<TranslateResult> {
   if (isWebMode()) {
-    return translateOnServer(filePath, config, pageRanges, onProgress);
+    return translateOnServer(filePath, config, pageRanges, onProgress, scannedMode);
   }
 
   const channel = new Channel<ProgressEvent>();
@@ -105,6 +116,7 @@ export async function translatePdf(
     filePath,
     configJson: JSON.stringify(config),
     pageRanges,
+    scannedMode,
     onProgress: channel,
   });
 }

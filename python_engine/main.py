@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json-config", "-j", help="JSON config string (for Tauri)")
     parser.add_argument("--output-dir", "-o", help="Output directory")
     parser.add_argument("--pages", "-p", help="Page ranges, e.g. 1-10 or 1,3,5")
+    parser.add_argument(
+        "--scanned-mode",
+        choices=["auto", "scanned", "digital"],
+        default=None,
+        help="Override scanned detection: auto (default), force scanned, or force digital",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     return parser.parse_args()
 
@@ -66,6 +72,14 @@ async def main() -> int:
         config.pages = args.pages
     if args.debug:
         config.debug = True
+    if args.scanned_mode == "scanned":
+        config.scanned.auto_detect = False
+        config.scanned.is_scanned = True
+    elif args.scanned_mode == "digital":
+        config.scanned.auto_detect = False
+        config.scanned.is_scanned = False
+    elif args.scanned_mode == "auto":
+        config.scanned.auto_detect = True
 
     # Setup logging — must go to stderr because stdout is reserved for JSON events
     log_level = logging.DEBUG if config.debug else logging.INFO

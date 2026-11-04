@@ -6,8 +6,10 @@ import {
   getPdfInfo,
   isWebMode,
   pickPdfFiles,
+  ScanVerdict,
   uploadToServer,
 } from "../lib/bridge";
+import { detectPdf, ScannedMode } from "../hooks/useTranslation";
 
 interface FileInfo {
   path: string;
@@ -21,6 +23,8 @@ interface Props {
   pageRanges: string;
   onChange: (files: string[]) => void;
   onPageRangesChange: (ranges: string) => void;
+  scannedModes: Record<string, ScannedMode>;
+  onScannedModeChange: (path: string, mode: ScannedMode) => void;
 }
 
 export default function FileUpload({
@@ -28,8 +32,11 @@ export default function FileUpload({
   pageRanges,
   onChange,
   onPageRangesChange,
+  scannedModes,
+  onScannedModeChange,
 }: Props) {
   const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
+  const [verdicts, setVerdicts] = useState<Record<string, ScanVerdict | null>>({});
 
   useEffect(() => {
     const loadInfos = async () => {
@@ -60,6 +67,44 @@ export default function FileUpload({
     };
     loadInfos();
   }, [files]);
+
+  // Scanned/digital verdict per file, shown on the card so the user can
+  // correct the engine *before* starting the translation.
+  useEffect(() => {
+    let cancelled = false;
+    for (const path of files) {
+      if (verdicts[path] !== undefined) continue;
+      setVerdicts((prev) => ({ ...prev, [path]: null }));
+      detectPdf(path)
+        .then((v) => {
+          if (!cancelled) setVerdicts((prev) => ({ ...prev, [path]: v }));
+        })
+        .catch(() => {
+          if (!cancelled) setVerdicts((prev) => ({ ...prev, [path]: null }));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
+
+  const effectiveMode = (path: string, verdict: ScanVerdict | null): boolean => {
+    const override = scannedModes[path] ?? "auto";
+    if (override === "scanned") return true;
+    if (override === "digital") return false;
+    return verdict?.is_scanned ?? false;
+  };
+
+  const cycleMode = (path: string, verdict: ScanVerdict | null) => {
+    const current = effectiveMode(path, verdict);
+    const override = scannedModes[path] ?? "auto";
+    // auto -> force the opposite of the detected verdict -> back to auto
+    if (override === "auto") {
+      onScannedModeChange(path, current ? "digital" : "scanned");
+    } else {
+      onScannedModeChange(path, "auto");
+    }
+  };
 
   const formatSize = (bytes: number) => {
     if (bytes === 0) return "Unknown";
@@ -166,6 +211,51 @@ export default function FileUpload({
                   {info.pages > 0 && `${info.pages} pages · `}
                   {formatSize(info.size)}
                 </div>
+                {(() => {
+                  const verdict = verdicts[info.path];
+                  const override = scannedModes[info.path] ?? "auto";
+                  const isScanned = effectiveMode(info.path, verdict);
+                  if (verdict === undefined || verdict === null) {
+                    return (
+                      <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
+                        detecting type…
+                      </div>
+                    );
+                  }
+                  return (
+                    <button
+                      onClick={() => cycleMode(info.path, verdict)}
+                      title={
+                        `${verdict.summary}\n\nClick to override ` +
+                        `(${override === "auto" ? "currently automatic" : "currently forced"})`
+                      }
+                      style={{
+                        marginTop: 6,
+                        padding: "2px 8px",
+                        fontSize: 11,
+                        borderRadius: 999,
+                        cursor: "pointer",
+                        border: "1px solid " + (isScanned ? "#f59e0b" : "#3b82f6"),
+                        background: "transparent",
+                        color: isScanned ? "#f59e0b" : "#3b82f6",
+                      }}
+                    >
+                      {isScanned ? "Scanned" : "Digital"}
+                      {override !== "auto" ? " (forced)" : ""}
+                      {" · click to change"}
+                    </button>
+                  );
+                })()}
+                {(() => {
+                  const verdict = verdicts[info.path];
+                  if (!verdict) return null;
+                  return (
+                    <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
+                      {verdict.reason} — {verdict.image_pages} image / {verdict.text_pages} text
+                      {" "}of {verdict.sampled} sampled pages
+                    </div>
+                  );
+                })()}
               </div>
               <button
                 onClick={() => onChange(files.filter((_, j) => j !== i))}

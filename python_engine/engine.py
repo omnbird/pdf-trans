@@ -767,7 +767,15 @@ class TranslationEngine:
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
                 logger.error("[Engine] Mistral pipeline crashed: %s\n%s", err_msg, traceback.format_exc())
-                self._report_error(f"Mistral pipeline crashed: {err_msg}")
+                hint = ""
+                lowered = err_msg.lower()
+                if "429" in err_msg or "rate_limit" in lowered or "quota" in lowered:
+                    hint = (
+                        "\n\nMistral is rate-limiting this account. Either wait/upgrade, "
+                        "or switch Settings > Scanned PDF > Processing Mode to "
+                        "\"OCR + keep original layout (BabelDOC)\" (local, free)."
+                    )
+                self._report_error(f"Mistral pipeline crashed: {err_msg}{hint}")
                 return {}
 
             if not mistral_outputs:

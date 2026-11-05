@@ -49,6 +49,7 @@ export interface AppConfig {
     is_scanned: boolean;
     ocr_model_size: "mobile" | "server";
     skip_figures_tables: boolean;
+    text_layer_font_scale: number;
     mode: "ocr" | "ocr_babeldoc" | "vision" | "mistral_ocr";
     dpi: number;
     mistral_api_key: string;
@@ -111,6 +112,7 @@ Chinese translation:`,
     is_scanned: false,
     ocr_model_size: "mobile",
     skip_figures_tables: true,
+    text_layer_font_scale: 0.88,
     mode: "ocr",
     dpi: 150,
     mistral_api_key: "",

@@ -25,7 +25,8 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Font size of the invisible layer = median line height × this factor.
+# Default for the invisible layer's font size = median line height × this
+# factor. Override per run with scanned.text_layer_font_scale.
 # Measured on a synthetic scan (10 pt original): 0.78 and 0.88 both give a
 # uniform result, 0.88 lands closest to the original size, while 1.0 makes
 # BabelDOC shrink individual paragraphs again (visible size jumps).
@@ -130,6 +131,7 @@ def build_text_layer_pdf(
     page_indices: Sequence[int] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     skip_diagrams: bool = True,
+    font_scale: float | None = None,
 ) -> Path:
     """Write OCR text back onto `src` as invisible text and save to `dst`.
 
@@ -141,6 +143,9 @@ def build_text_layer_pdf(
         dpi: rendering resolution for OCR — higher is more accurate but slower
         page_indices: pages to OCR (0-based); None = all pages
         on_progress: callback(done, total) for progress reporting
+        font_scale: font size of the layer relative to the median line height
+            (default FONT_SIZE_FACTOR); smaller leaves more room so BabelDOC
+            does not have to shrink the translation itself
         skip_diagrams: leave text inside figures/tables untranslated (charts and
             diagram labels read as gibberish when machine-translated, and the
             page image already contains them)
@@ -197,7 +202,14 @@ def build_text_layer_pdf(
                     b.height for b in (blocks or [])
                     if getattr(b, "height", 0) > 0 and (getattr(b, "text", "") or "").strip()
                 )
-                page_font = max(3.0, heights[len(heights) // 2] * scale * FONT_SIZE_FACTOR) if heights else None
+                factor = font_scale if font_scale and font_scale > 0 else FONT_SIZE_FACTOR
+                page_font = max(3.0, heights[len(heights) // 2] * scale * factor) if heights else None
+                if page_font and heights:
+                    original_pt = heights[len(heights) // 2] * scale
+                    logger.info(
+                        "[textlayer] page %d: original type ≈ %.1f pt, layer set to %.1f pt",
+                        idx + 1, original_pt, page_font,
+                    )
                 for block in blocks or []:
                     text = (getattr(block, "text", "") or "").strip()
                     if not text:

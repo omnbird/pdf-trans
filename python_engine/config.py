@@ -149,6 +149,10 @@ class ScannedConfig(BaseModel):
     # (horoscope grids, tables of glyphs) turn into noise when translated, and
     # the page image already shows them.
     skip_figures_tables: bool = True
+    # Invisible text-layer font size, as a fraction of the page's median line
+    # height. Dense books (original type ~7 pt) should keep this low so
+    # BabelDOC does not shrink further; spacious books can use ~0.95.
+    text_layer_font_scale: float = 0.88
     mistral_api_key: str = ""  # API key for Mistral OCR mode
 
 

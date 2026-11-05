@@ -463,6 +463,21 @@ export default function SettingsPanel({ config, onChange }: Props) {
 
             {config.scanned.mode === "ocr_babeldoc" && (
               <>
+                <Input
+                  label="Translated text size (× original line height)"
+                  value={String(config.scanned.text_layer_font_scale)}
+                  onChange={(v) =>
+                    update("scanned.text_layer_font_scale", parseFloat(v) || 0.88)
+                  }
+                  type="number"
+                  step="0.02"
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: -8, marginBottom: 12 }}>
+                  Denser books (original type ~7 pt) need a smaller value so the translation
+                  is not shrunk twice; spacious books can use 0.95. The run log prints the
+                  detected original size and what the layer used, plus a warning when the
+                  smallest rendered text falls below ~9 pt (readability floor for Chinese).
+                </div>
                 <CheckBox
                   label="Leave charts & tables untranslated (recommended)"
                   checked={config.scanned.skip_figures_tables}

@@ -771,6 +771,7 @@ class TranslationEngine:
             page_indices,
             _ocr_progress,
             skip_diagrams=self.config.scanned.skip_figures_tables,
+            font_scale=self.config.scanned.text_layer_font_scale,
         )
 
         self._report_progress(
